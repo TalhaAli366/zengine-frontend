@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Search, Music, Settings, RefreshCw, Hash } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -354,8 +355,8 @@ export default function ScrapersPage() {
 
         {message && (
           <div className={`mb-6 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' :
-              message.type === 'info' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
-                'bg-red-50 text-red-800 border border-red-200'
+            message.type === 'info' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+              'bg-red-50 text-red-800 border border-red-200'
             }`}>
             {message.text}
           </div>
@@ -366,7 +367,7 @@ export default function ScrapersPage() {
             <div>
               <p className="text-sm font-semibold text-blue-900 uppercase tracking-wide">Scraper in progress</p>
               <p className="text-lg font-bold text-blue-900 flex items-center gap-2">
-                {activeRun.scraper_type === 'hashtag' ? '🔍' : activeRun.scraper_type === 'sound' ? '🎵' : '⚙️'}
+                {activeRun.scraper_type === 'hashtag' ? <Hash className="w-5 h-5" /> : activeRun.scraper_type === 'sound' ? <Music className="w-5 h-5" /> : <Settings className="w-5 h-5" />}
                 {formatScraperType(activeRun.scraper_type)}
               </p>
               <p className="text-sm text-blue-900 mt-1">
@@ -389,7 +390,7 @@ export default function ScrapersPage() {
                 onClick={() => checkRunningScrapers()}
                 className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
               >
-                🔄 Refresh status
+                <RefreshCw className="w-4 h-4" /> Refresh status
               </button>
               <p className="text-xs text-blue-800">
                 You can navigate away — this run continues in the background.
@@ -404,20 +405,20 @@ export default function ScrapersPage() {
               <button
                 onClick={() => setActiveTab('hashtag')}
                 className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'hashtag'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
               >
-                🔍 Hashtag Scraper
+                <Hash className="w-4 h-4 inline mr-1" /> Hashtag Scraper
               </button>
               <button
                 onClick={() => setActiveTab('sound')}
                 className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'sound'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
               >
-                🎵 Sound Scraper
+                <Music className="w-4 h-4 inline mr-1" /> Sound Scraper
               </button>
               <button
                 onClick={async () => {
@@ -425,8 +426,8 @@ export default function ScrapersPage() {
                   await loadScraperRuns();
                 }}
                 className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'runs'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
               >
                 History
@@ -658,7 +659,7 @@ export default function ScrapersPage() {
                         {scraperRuns.map((run) => (
                           <tr key={run.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-4 py-4 text-sm font-medium text-gray-900">
-                              {run.scraper_type === 'hashtag' ? '🔍 ' : '🎵 '}
+                              {run.scraper_type === 'hashtag' ? <Hash className="w-4 h-4 inline mr-1" /> : <Music className="w-4 h-4 inline mr-1" />}
                               {run.scraper_type}
                             </td>
                             <td className="px-4 py-4 text-sm text-gray-600">
@@ -692,24 +693,24 @@ export default function ScrapersPage() {
 
         {/* Info Banner */}
         <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6">
-          <h3 className="font-semibold text-gray-900 mb-3">📚 Next Steps After Scraping:</h3>
+          <h3 className="font-semibold text-gray-900 mb-3">Next Steps After Scraping</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div className="flex items-start">
-              <span className="text-2xl mr-3">1️⃣</span>
+              <span className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold mr-3 flex-shrink-0">1</span>
               <div>
                 <p className="font-medium text-gray-800">Check Results</p>
                 <p className="text-gray-600">Visit the <Link href="/dashboard/influencers" className="text-blue-600 hover:underline">Influencers page</Link> to see discovered creators</p>
               </div>
             </div>
             <div className="flex items-start">
-              <span className="text-2xl mr-3">2️⃣</span>
+              <span className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold mr-3 flex-shrink-0">2</span>
               <div>
                 <p className="font-medium text-gray-800">Filter & Select</p>
                 <p className="text-gray-600">Filter by campaign, followers, engagement to find best matches</p>
               </div>
             </div>
             <div className="flex items-start">
-              <span className="text-2xl mr-3">3️⃣</span>
+              <span className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-bold mr-3 flex-shrink-0">3</span>
               <div>
                 <p className="font-medium text-gray-800">Start Outreach</p>
                 <p className="text-gray-600">Go to <Link href="/dashboard/outreach" className="text-blue-600 hover:underline">Outreach</Link> to send bulk emails</p>
