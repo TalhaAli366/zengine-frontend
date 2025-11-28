@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="zengine-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="50%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="zengine-accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F2EA"/>
+      <stop offset="100%" stop-color="#FF0050"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Rounded square background -->
+  <rect x="5" y="5" width="90" height="90" rx="20" fill="url(#zengine-bg)"/>
+  
+  <!-- Dynamic orbit lines -->
+  <path d="M15 55 Q50 35 85 45" stroke="#00F2EA" stroke-width="3" stroke-linecap="round" opacity="0.35"/>
+  <path d="M15 60 Q50 80 85 65" stroke="#FF0050" stroke-width="3" stroke-linecap="round" opacity="0.3"/>
+  
+  <!-- Stylized Z -->
+  <path d="M30 30 H75 L30 70 H75" fill="none" stroke="url(#zengine-accent)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  
+  <!-- Engine spark -->
+  <circle cx="72" cy="32" r="6" fill="#00F2EA" opacity="0.9"/>
+  <circle cx="70" cy="68" r="4" fill="#FF0050" opacity="0.8"/>
+</svg>
+
