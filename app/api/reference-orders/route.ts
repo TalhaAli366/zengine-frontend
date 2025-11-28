@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
       query = query.lte('date_paid', dateTo);
     }
 
-    // Apply sorting - handle avg_views separately since it comes from a join
+    // Apply sorting - handle avg_views and owner_name separately
     const validSortColumns = ['date_paid', 'owner_name', 'username', 'price_per_video', 'final_price'];
     const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'date_paid';
     const ascending = sortOrder === 'asc';
@@ -110,15 +110,16 @@ export async function GET(request: NextRequest) {
     let data: any[] = [];
     let count = 0;
 
-    // For avg_views sorting, we need to fetch all, join, sort, then paginate
-    if (sortBy === 'avg_views') {
+    // For avg_views and owner_name sorting, we need to fetch all, sort, then paginate
+    // (owner_name needs case-insensitive sorting which Supabase doesn't support easily)
+    if (sortBy === 'avg_views' || sortBy === 'owner_name') {
       // Fetch ALL matching records (without pagination) to sort them properly
       const { data: allData, error: allError, count: totalCount } = await query;
       if (allError) throw allError;
 
       count = totalCount || 0;
 
-      // Get all normalized usernames
+      // Get all normalized usernames for avg_views enrichment
       const normalizedUsernames = Array.from(
         new Set((allData || []).map((row) => row.normalized_username).filter(Boolean)),
       );
@@ -158,12 +159,23 @@ export async function GET(request: NextRequest) {
         };
       });
 
-      // Sort by avg_views
-      enrichedAll.sort((a, b) => {
-        const aVal = a.avg_views ?? -1;
-        const bVal = b.avg_views ?? -1;
-        return ascending ? aVal - bVal : bVal - aVal;
-      });
+      // Sort based on the selected column
+      if (sortBy === 'avg_views') {
+        enrichedAll.sort((a, b) => {
+          const aVal = a.avg_views ?? -1;
+          const bVal = b.avg_views ?? -1;
+          return ascending ? aVal - bVal : bVal - aVal;
+        });
+      } else if (sortBy === 'owner_name') {
+        // Case-insensitive string sorting
+        enrichedAll.sort((a, b) => {
+          const aVal = (a.owner_name || '').toLowerCase();
+          const bVal = (b.owner_name || '').toLowerCase();
+          if (aVal < bVal) return ascending ? -1 : 1;
+          if (aVal > bVal) return ascending ? 1 : -1;
+          return 0;
+        });
+      }
 
       // Apply pagination to sorted data
       data = enrichedAll.slice(offset, offset + limit);
