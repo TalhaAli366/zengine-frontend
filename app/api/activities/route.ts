@@ -1,34 +1,37 @@
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const supabase = createServerComponentClient({ cookies });
-    
+
     // Fetch recent scraper runs
     const { data: scraperRuns, error: scraperError } = await supabase
       .from('scraper_runs')
       .select('id, scraper_type, status, started_at, completed_at, total_results, new_influencers, updated_influencers, input_data')
       .order('started_at', { ascending: false })
       .limit(10);
-    
+
     // Fetch recent outreach logs
     const { data: outreachLogs, error: outreachError } = await supabase
       .from('outreach_logs')
       .select('id, campaign_id, influencer_id, channel, to_address, subject, sent_at, status')
       .order('sent_at', { ascending: false })
       .limit(10);
-    
+
     // Fetch recent campaigns
     const { data: campaigns, error: campaignError } = await supabase
       .from('campaigns')
       .select('id, name, status, created_at')
       .order('created_at', { ascending: false })
       .limit(5);
-    
+
     // Combine and format activities
     const activities: any[] = [];
-    
+
     // Add scraper runs
     if (scraperRuns) {
       scraperRuns.forEach(run => {
@@ -44,7 +47,7 @@ export async function GET() {
           const usernames = inputData.usernames || [];
           description = `Scraped profiles: ${usernames.length} profile(s)`;
         }
-        
+
         activities.push({
           id: run.id,
           type: 'scraper',
@@ -60,7 +63,7 @@ export async function GET() {
         });
       });
     }
-    
+
     // Add outreach logs
     if (outreachLogs) {
       outreachLogs.forEach(log => {
@@ -78,7 +81,7 @@ export async function GET() {
         });
       });
     }
-    
+
     // Add campaigns
     if (campaigns) {
       campaigns.forEach(campaign => {
@@ -92,10 +95,10 @@ export async function GET() {
         });
       });
     }
-    
+
     // Sort by timestamp (most recent first) and limit to 20
     activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    
+
     return Response.json({
       activities: activities.slice(0, 20)
     });
@@ -104,4 +107,3 @@ export async function GET() {
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
-
