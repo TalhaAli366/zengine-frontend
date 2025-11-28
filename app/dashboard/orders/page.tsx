@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video } from 'lucide-react';
 import { importReferenceOrders, ReferenceImportResult } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -207,6 +207,8 @@ export default function ReferenceOrdersPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [videoLinksModalOpen, setVideoLinksModalOpen] = useState(false);
+  const [selectedVideoLinks, setSelectedVideoLinks] = useState<string>('');
 
   const manualOrderDefaults = useMemo(
     () => ({
@@ -1250,6 +1252,7 @@ export default function ReferenceOrdersPage() {
                               )}
                             </button>
                           </th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Videos</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
                         </tr>
                       </thead>
@@ -1349,6 +1352,22 @@ export default function ReferenceOrdersPage() {
                                   <p className="text-xs text-gray-500">
                                     {order.avg_views_status === 'no_data' ? 'No data yet' : 'Not calculated'}
                                   </p>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {order.video_links && order.video_links.trim() ? (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedVideoLinks(order.video_links || '');
+                                      setVideoLinksModalOpen(true);
+                                    }}
+                                    className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
+                                  >
+                                    <Video className="w-4 h-4" />
+                                    View ({order.video_links.split('\n').filter(l => l.trim()).length})
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-gray-400">No videos</span>
                                 )}
                               </td>
                               <td className="px-6 py-4 text-sm">
@@ -1989,6 +2008,67 @@ export default function ReferenceOrdersPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Video Links Modal */}
+      {videoLinksModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Video className="w-5 h-5 text-blue-600" />
+                Video Links
+              </h3>
+              <button
+                onClick={() => setVideoLinksModalOpen(false)}
+                className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="px-6 py-6 overflow-y-auto flex-1">
+              {selectedVideoLinks && selectedVideoLinks.trim() ? (
+                <div className="space-y-3">
+                  {selectedVideoLinks.split('\n').filter(link => link.trim()).map((link, index) => (
+                    <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                      <span className="text-sm font-medium text-gray-500 min-w-[30px]">#{index + 1}</span>
+                      <a
+                        href={link.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-sm text-blue-600 hover:text-blue-800 hover:underline truncate font-mono"
+                        title={link.trim()}
+                      >
+                        {link.trim()}
+                      </a>
+                      <a
+                        href={link.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 hover:bg-white rounded-lg transition-colors"
+                        title="Open in new tab"
+                      >
+                        <ExternalLink className="w-4 h-4 text-gray-500" />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-gray-500 py-8">No video links available</p>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setVideoLinksModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
