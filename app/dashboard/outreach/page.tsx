@@ -77,12 +77,12 @@ export default function OutreachPage() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  
+
   // Template form
   const [templateName, setTemplateName] = useState('');
   const [templateSubject, setTemplateSubject] = useState('');
   const [templateBody, setTemplateBody] = useState('');
-  
+
   // Outreach logs
   const [outreachLogs, setOutreachLogs] = useState<OutreachLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -102,7 +102,7 @@ export default function OutreachPage() {
     loadCampaigns();
     const loadedFromSelection = loadSelectionFromStorage(false);
     if (!loadedFromSelection) {
-    loadInfluencers();
+      loadInfluencers();
     }
     loadZohoStatus();
   }, []);
@@ -241,8 +241,33 @@ export default function OutreachPage() {
       console.error('Failed to load influencers:', error);
     }
   };
-  
+
   // Load influencers for specific campaign
+  const deleteTemplate = async (templateId: string) => {
+    if (!confirm('Are you sure you want to delete this template?')) return;
+
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/v1/outreach/templates/${templateId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Template deleted successfully' });
+        loadTemplates();
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.detail || 'Failed to delete template' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const createTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -295,9 +320,9 @@ export default function OutreachPage() {
 
       if (response.ok) {
         const data = await response.json();
-        setMessage({ 
-          type: 'success', 
-          text: `Sending emails to ${data.total_recipients} influencers...` 
+        setMessage({
+          type: 'success',
+          text: `Sending emails to ${data.total_recipients} influencers...`
         });
         setSelectedInfluencers([]);
         // Refresh logs after sending (with a small delay to allow backend to process)
@@ -455,7 +480,7 @@ export default function OutreachPage() {
       delivered: 'bg-blue-100 text-blue-800',
       bounced: 'bg-orange-100 text-orange-800',
     };
-    
+
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-semibold ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
         {status?.toUpperCase() || 'UNKNOWN'}
@@ -478,11 +503,10 @@ export default function OutreachPage() {
         </div>
 
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
-            message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 
+          <div className={`mb-6 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' :
             message.type === 'info' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
-            'bg-red-50 text-red-800 border border-red-200'
-          }`}>
+              'bg-red-50 text-red-800 border border-red-200'
+            }`}>
             {message.text}
           </div>
         )}
@@ -492,41 +516,37 @@ export default function OutreachPage() {
             <div className="flex space-x-8 px-6">
               <button
                 onClick={() => setActiveTab('send')}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'send'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'send'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Send Emails
               </button>
               <button
                 onClick={() => setActiveTab('templates')}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'templates'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'templates'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Email Templates
               </button>
               <button
                 onClick={() => setActiveTab('logs')}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'logs'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'logs'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Outreach Logs
               </button>
               <button
                 onClick={() => setActiveTab('settings')}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'settings'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'settings'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 Email Settings
               </button>
@@ -561,13 +581,13 @@ export default function OutreachPage() {
                       Select Influencers ({selectedInfluencers.length} selected)
                     </label>
                     <div className="flex flex-wrap gap-3 text-sm">
-                    <button
-                      type="button"
-                      onClick={selectAllInfluencers}
+                      <button
+                        type="button"
+                        onClick={selectAllInfluencers}
                         className="text-blue-600 hover:text-blue-700"
-                    >
-                      {selectedInfluencers.length === influencers.length ? 'Deselect All' : 'Select All'}
-                    </button>
+                      >
+                        {selectedInfluencers.length === influencers.length ? 'Deselect All' : 'Select All'}
+                      </button>
                       <button
                         type="button"
                         onClick={handleReloadSelection}
@@ -589,7 +609,7 @@ export default function OutreachPage() {
                       Showing influencers you sent from the dashboard list. Use "Clear Outreach Selection" to start over.
                     </p>
                   )}
-                  
+
                   <div className="border border-gray-300 rounded-lg max-h-96 overflow-y-auto">
                     {influencers.length === 0 ? (
                       <div className="p-4 text-center text-gray-500">
@@ -721,11 +741,22 @@ export default function OutreachPage() {
                                 {template.body.substring(0, 100)}...
                               </p>
                             </div>
-                            {template.is_default && (
-                              <span className="ml-4 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-                                Default
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2 ml-4">
+                              {template.is_default && (
+                                <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                                  Default
+                                </span>
+                              )}
+                              <button
+                                onClick={() => deleteTemplate(template.id)}
+                                className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition-colors"
+                                title="Delete template"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -845,131 +876,131 @@ export default function OutreachPage() {
                   <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
                     <p className="text-gray-500 mb-2">No outreach logs found</p>
                     <p className="text-sm text-gray-400">
-                      {logFilterCampaign || logFilterStatus 
-                        ? 'Try adjusting your filters' 
+                      {logFilterCampaign || logFilterStatus
+                        ? 'Try adjusting your filters'
                         : 'Send emails to see logs here'}
                     </p>
                   </div>
                 )}
               </div>
-          )}
-
-          {activeTab === 'settings' && (
-            <div className="space-y-8">
-              <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Zoho Mail Integration</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  Connect your Zoho Mail account to send outreach emails directly from your Zoho mailbox.
-                </p>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">Status</p>
-                    <p className="text-lg font-semibold text-gray-900 capitalize">
-                      {zohoStatus?.status || 'disconnected'}
-                    </p>
-                    {zohoStatus?.from_address && (
-                      <p className="text-sm text-gray-600 mt-1">
-                        From:{' '}
-                        <span className="font-medium">
-                          {zohoStatus.from_address}
-                        </span>
-                      </p>
-                    )}
-                    {zohoStatus?.last_connected_at && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Last connected: {new Date(zohoStatus.last_connected_at).toLocaleString()}
-                      </p>
-                    )}
-                    {zohoStatus?.source === 'env' && (
-                      <p className="text-xs text-yellow-700 mt-2">
-                        This integration is managed via environment variables.
-                      </p>
             )}
-          </div>
-                  {zohoStatus?.status === 'connected' && zohoStatus?.can_disconnect && (
-                    <button
-                      onClick={handleZohoDisconnect}
-                      disabled={zohoLoading}
-                      className="px-4 py-2 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
-                    >
-                      {zohoLoading ? 'Disconnecting...' : 'Disconnect'}
-                    </button>
-                  )}
-                </div>
-              </div>
 
-              {zohoStatus?.source !== 'env' && (
-                <form onSubmit={handleZohoSetup} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Zoho Client ID
-                      </label>
-                      <input
-                        type="text"
-                        value={zohoForm.clientId}
-                        onChange={(e) => setZohoForm((prev) => ({ ...prev, clientId: e.target.value }))}
-                        required
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                        placeholder="1000.xxxxxx"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Zoho Client Secret
-                      </label>
-                      <input
-                        type="password"
-                        value={zohoForm.clientSecret}
-                        onChange={(e) => setZohoForm((prev) => ({ ...prev, clientSecret: e.target.value }))}
-                        required
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                        placeholder="Secret token"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        From Email Address
-                      </label>
-                      <input
-                        type="email"
-                        value={zohoForm.fromAddress}
-                        onChange={(e) => setZohoForm((prev) => ({ ...prev, fromAddress: e.target.value }))}
-                        required
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                        placeholder="you@yourdomain.com"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Data Center
-                      </label>
-                      <select
-                        value={zohoForm.dataCenter}
-                        onChange={(e) => setZohoForm((prev) => ({ ...prev, dataCenter: e.target.value }))}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                      >
-                        <option value="com">United States (.com)</option>
-                        <option value="eu">Europe (.eu)</option>
-                        <option value="in">India (.in)</option>
-                        <option value="cn">China (.cn)</option>
-                        <option value="au">Australia (.au)</option>
-                      </select>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    After clicking connect you&apos;ll be redirected to Zoho to approve access. Make sure the selected mailbox matches the from address above.
+            {activeTab === 'settings' && (
+              <div className="space-y-8">
+                <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+                  <h3 className="text-xl font-semibold text-gray-900 mb-2">Zoho Mail Integration</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Connect your Zoho Mail account to send outreach emails directly from your Zoho mailbox.
                   </p>
-                  <button
-                    type="submit"
-                    disabled={zohoLoading}
-                    className="inline-flex items-center px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition disabled:opacity-50"
-                  >
-                    {zohoLoading ? 'Opening Zoho...' : 'Connect Zoho Mail'}
-                  </button>
-                </form>
-              )}
-            </div>
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Status</p>
+                      <p className="text-lg font-semibold text-gray-900 capitalize">
+                        {zohoStatus?.status || 'disconnected'}
+                      </p>
+                      {zohoStatus?.from_address && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          From:{' '}
+                          <span className="font-medium">
+                            {zohoStatus.from_address}
+                          </span>
+                        </p>
+                      )}
+                      {zohoStatus?.last_connected_at && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Last connected: {new Date(zohoStatus.last_connected_at).toLocaleString()}
+                        </p>
+                      )}
+                      {zohoStatus?.source === 'env' && (
+                        <p className="text-xs text-yellow-700 mt-2">
+                          This integration is managed via environment variables.
+                        </p>
+                      )}
+                    </div>
+                    {zohoStatus?.status === 'connected' && zohoStatus?.can_disconnect && (
+                      <button
+                        onClick={handleZohoDisconnect}
+                        disabled={zohoLoading}
+                        className="px-4 py-2 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+                      >
+                        {zohoLoading ? 'Disconnecting...' : 'Disconnect'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {zohoStatus?.source !== 'env' && (
+                  <form onSubmit={handleZohoSetup} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Zoho Client ID
+                        </label>
+                        <input
+                          type="text"
+                          value={zohoForm.clientId}
+                          onChange={(e) => setZohoForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                          required
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                          placeholder="1000.xxxxxx"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Zoho Client Secret
+                        </label>
+                        <input
+                          type="password"
+                          value={zohoForm.clientSecret}
+                          onChange={(e) => setZohoForm((prev) => ({ ...prev, clientSecret: e.target.value }))}
+                          required
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                          placeholder="Secret token"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          From Email Address
+                        </label>
+                        <input
+                          type="email"
+                          value={zohoForm.fromAddress}
+                          onChange={(e) => setZohoForm((prev) => ({ ...prev, fromAddress: e.target.value }))}
+                          required
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                          placeholder="you@yourdomain.com"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Data Center
+                        </label>
+                        <select
+                          value={zohoForm.dataCenter}
+                          onChange={(e) => setZohoForm((prev) => ({ ...prev, dataCenter: e.target.value }))}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        >
+                          <option value="com">United States (.com)</option>
+                          <option value="eu">Europe (.eu)</option>
+                          <option value="in">India (.in)</option>
+                          <option value="cn">China (.cn)</option>
+                          <option value="au">Australia (.au)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      After clicking connect you&apos;ll be redirected to Zoho to approve access. Make sure the selected mailbox matches the from address above.
+                    </p>
+                    <button
+                      type="submit"
+                      disabled={zohoLoading}
+                      className="inline-flex items-center px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+                    >
+                      {zohoLoading ? 'Opening Zoho...' : 'Connect Zoho Mail'}
+                    </button>
+                  </form>
+                )}
+              </div>
             )}
           </div>
         </div>
