@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
     const matched = searchParams.get('matched') || '';
     const dateFrom = searchParams.get('date_from');
     const dateTo = searchParams.get('date_to');
+    const sortBy = searchParams.get('sort_by') || 'date_paid';
+    const sortOrder = searchParams.get('sort_order') || 'desc';
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25', 10)));
@@ -61,6 +63,7 @@ export async function GET(request: NextRequest) {
         songs,
         paid,
         date_paid,
+        video_links,
         created_at
       `, { count: 'exact' })
       .order('date_paid', { ascending: false, nullsFirst: false });
@@ -99,6 +102,19 @@ export async function GET(request: NextRequest) {
       query = query.lte('date_paid', dateTo);
     }
 
+    // Apply sorting - handle avg_views separately since it comes from a join
+    const validSortColumns = ['date_paid', 'owner_name', 'username', 'price_per_video', 'final_price'];
+    const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'date_paid';
+    const ascending = sortOrder === 'asc';
+
+    // For avg_views, we'll sort after joining with avg views data
+    if (sortBy !== 'avg_views') {
+      query = query.order(sortColumn, { ascending, nullsFirst: false });
+    } else {
+      // Default sort by date_paid when sorting by avg_views (will be re-sorted later)
+      query = query.order('date_paid', { ascending: false, nullsFirst: false });
+    }
+
     const { data, error, count } = await query.range(offset, offset + limit - 1);
     if (error) throw error;
 
@@ -129,7 +145,7 @@ export async function GET(request: NextRequest) {
       }, {} as typeof avgViewMap);
     }
 
-    const enrichedOrders = (data || []).map((row) => {
+    let enrichedOrders = (data || []).map((row) => {
       const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
       return {
         ...row,
@@ -138,6 +154,15 @@ export async function GET(request: NextRequest) {
         avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
       };
     });
+
+    // Apply avg_views sorting if requested (client-side since it's from a separate table)
+    if (sortBy === 'avg_views') {
+      enrichedOrders = enrichedOrders.sort((a, b) => {
+        const aVal = a.avg_views ?? -1;
+        const bVal = b.avg_views ?? -1;
+        return ascending ? aVal - bVal : bVal - aVal;
+      });
+    }
 
     const { data: summaryRow } = await supabase
       .from('reference_orders_stats')
@@ -225,6 +250,7 @@ export async function POST(request: NextRequest) {
       final_price: parseNumber(body.finalPrice ?? body.final_price),
       price_per_video: parseNumber(body.pricePerVideo ?? body.price_per_video),
       songs: body.songs || null,
+      video_links: body.videoLinks || body.video_links || null,
       paid: parseBoolean(body.paid ?? body.isPaid ?? body.paid_status) ?? false,
       owner_name: ownerName || null,
       date_paid: datePaid || null,
@@ -296,6 +322,10 @@ export async function PATCH(request: NextRequest) {
 
     if (body.songs !== undefined) {
       updatePayload.songs = body.songs || null;
+    }
+
+    if (body.videoLinks !== undefined || body.video_links !== undefined) {
+      updatePayload.video_links = body.videoLinks || body.video_links || null;
     }
 
     if (body.approvedVendor !== undefined || body.approved_vendor !== undefined) {
