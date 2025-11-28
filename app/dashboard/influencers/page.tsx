@@ -61,15 +61,13 @@ interface OutreachSelectionInfluencer {
 
 export default function InfluencersPage() {
   const router = useRouter();
-  const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [importResult, setImportResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
   const [allInfluencers, setAllInfluencers] = useState<Influencer[]>([]);
   const [loadingInfluencers, setLoadingInfluencers] = useState(true);
-  const [activeTab, setActiveTab] = useState<'list' | 'visualizations' | 'import'>('list');
-  
+  const [activeTab, setActiveTab] = useState<'list' | 'visualizations'>('list');
+
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState('');
@@ -108,7 +106,7 @@ export default function InfluencersPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
-  
+
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
@@ -174,7 +172,7 @@ export default function InfluencersPage() {
       // Filter out selections that no longer exist in current view
       const currentIds = new Set(allInfluencers.map(inf => inf.id));
       const validIds = selectedInfluencerIds.filter(id => currentIds.has(id));
-      
+
       if (validIds.length !== selectedInfluencerIds.length) {
         // Some selections are stale - update
         setSelectedInfluencerIds(validIds);
@@ -185,7 +183,7 @@ export default function InfluencersPage() {
           }
         });
         setSelectedInfluencerDetails(newDetails);
-        
+
         if (validIds.length === 0) {
           window.localStorage.removeItem('outreachSelection');
         } else {
@@ -199,7 +197,7 @@ export default function InfluencersPage() {
     // Client-side search filter (instant feedback)
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      const filtered = allInfluencers.filter(inf => 
+      const filtered = allInfluencers.filter(inf =>
         inf.username?.toLowerCase().includes(query) ||
         inf.display_name?.toLowerCase().includes(query)
       );
@@ -238,11 +236,11 @@ export default function InfluencersPage() {
     try {
       setLoadingInfluencers(true);
       const params = new URLSearchParams();
-      
+
       // Pagination
       params.append('page', currentPage.toString());
       params.append('limit', itemsPerPage.toString());
-      
+
       // Filters
       if (selectedCampaign) params.append('campaign', selectedCampaign);
       if (searchQuery) params.append('search', searchQuery);
@@ -256,12 +254,12 @@ export default function InfluencersPage() {
       if (selectedSound) params.append('sound_id', selectedSound);
       if (reachedOutFilter) params.append('reached_out', reachedOutFilter);
       if (onlyWithEmail) params.append('has_email', 'true');
-      
+
       const url = `/api/influencers?${params.toString()}`;
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to load');
       const result = await response.json();
-      
+
       // Handle both old format (array) and new format (object with pagination)
       if (Array.isArray(result)) {
         setAllInfluencers(result);
@@ -398,51 +396,23 @@ export default function InfluencersPage() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
 
-    setImporting(true);
-    setError(null);
-    setImportResult(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch(`${API_URL}/api/v1/import-export/import`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Import failed');
-      }
-
-      const result = await response.json();
-      setImportResult(result);
-      setTimeout(() => {
-        loadInfluencers();
-        setActiveTab('list');
-      }, 1000);
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during import');
-    } finally {
-      setImporting(false);
-    }
-  };
 
   const handleExport = async (format: 'csv' | 'excel') => {
     setExporting(true);
     setError(null);
 
     try {
+      const params = new URLSearchParams();
+      if (minFollowers) params.append('min_followers', minFollowers);
+      if (maxFollowers) params.append('max_followers', maxFollowers);
+
       const endpoint = format === 'csv' ? 'export/csv' : 'export/excel';
-      const response = await fetch(`${API_URL}/api/v1/import-export/${endpoint}`);
+      const response = await fetch(`${API_URL}/api/v1/import-export/${endpoint}?${params.toString()}`);
 
       if (!response.ok) {
-        throw new Error('Export failed');
+        const errorText = await response.text();
+        throw new Error(`Export failed: ${response.status} ${response.statusText}`);
       }
 
       const blob = await response.blob();
@@ -455,34 +425,14 @@ export default function InfluencersPage() {
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
+      console.error('Export error:', err);
       setError(err.message || 'An error occurred during export');
     } finally {
       setExporting(false);
     }
   };
 
-  const downloadTemplate = async (format: 'csv' | 'excel') => {
-    try {
-      const endpoint = format === 'csv' ? 'template/csv' : 'template/excel';
-      const response = await fetch(`${API_URL}/api/v1/import-export/${endpoint}`);
 
-      if (!response.ok) {
-        throw new Error('Download failed');
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `influencers_template.${format === 'csv' ? 'csv' : 'xlsx'}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setError(err.message || 'Template download failed');
-    }
-  };
 
 
   const handleDetectRegion = async (influencerId: string) => {
@@ -603,7 +553,7 @@ export default function InfluencersPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Influencers</h1>
           <p className="text-gray-600">
-            Showing {influencers.length} of {totalCount} influencers 
+            Showing {influencers.length} of {totalCount} influencers
             {totalPages > 1 && ` (Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
@@ -612,14 +562,31 @@ export default function InfluencersPage() {
             {hasSelection ? `${selectedInfluencerIds.length} selected for outreach` : 'Select influencers to build outreach list'}
           </p>
           <div className="flex flex-wrap gap-2">
+            <div className="flex rounded-lg shadow-sm">
+              <button
+                onClick={() => handleExport('csv')}
+                disabled={exporting}
+                className="px-4 py-2 text-sm font-medium bg-white border border-gray-300 rounded-l-lg hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                CSV
+              </button>
+              <button
+                onClick={() => handleExport('excel')}
+                disabled={exporting}
+                className="px-4 py-2 text-sm font-medium bg-white border border-l-0 border-gray-300 rounded-r-lg hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+                Excel
+              </button>
+            </div>
             <button
               onClick={handleSendToOutreach}
               disabled={!hasSelection}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                hasSelection
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasSelection
                   ? 'text-white bg-primary-600 hover:bg-primary-700'
                   : 'text-gray-500 bg-gray-200 cursor-not-allowed'
-              }`}
+                }`}
             >
               Send to Outreach
             </button>
@@ -655,35 +622,24 @@ export default function InfluencersPage() {
       <div className="flex gap-4 mb-6 border-b border-gray-200">
         <button
           onClick={() => setActiveTab('list')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-            activeTab === 'list'
+          className={`px-4 py-2 font-medium border-b-2 transition-colors ${activeTab === 'list'
               ? 'border-primary-600 text-primary-600'
               : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
+            }`}
         >
           Influencer List ({influencers.length})
         </button>
         <button
           onClick={() => setActiveTab('visualizations')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${
-            activeTab === 'visualizations'
+          className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'visualizations'
               ? 'border-primary-600 text-primary-600'
               : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
+            }`}
         >
           <BarChart3 className="w-4 h-4" />
           Analytics & Visualizations
         </button>
-        <button
-          onClick={() => setActiveTab('import')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-            activeTab === 'import'
-              ? 'border-primary-600 text-primary-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          Import / Export
-        </button>
+
       </div>
 
       {/* Influencer List Tab */}
@@ -947,151 +903,151 @@ export default function InfluencersPage() {
             )}
           </div>
 
-      {editingInfluencer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Edit Influencer</h2>
-                <p className="text-sm text-gray-500">Update contact and performance fields before sending to outreach.</p>
+          {editingInfluencer && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">Edit Influencer</h2>
+                    <p className="text-sm text-gray-500">Update contact and performance fields before sending to outreach.</p>
+                  </div>
+                  <button onClick={closeEditModal} className="text-gray-500 hover:text-gray-700" aria-label="Close edit modal">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <form onSubmit={handleEditSubmit} className="px-6 py-6 space-y-6">
+                  {editError && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{editError}</div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+                      <input
+                        type="text"
+                        value={editForm.displayName}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, displayName: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        placeholder="Creator name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={editForm.email}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        placeholder="creator@email.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                      <input
+                        type="text"
+                        value={editForm.country}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, country: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        placeholder="United States"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Followers</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editForm.followers}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, followers: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        placeholder="150000"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Average Views</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editForm.avgViews}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, avgViews: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        placeholder="50000"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Engagement Rate (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={editForm.engagementRate}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, engagementRate: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        placeholder="1.25"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Last Outreach Date</label>
+                      <input
+                        type="date"
+                        value={editForm.lastOutreachAt}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, lastOutreachAt: e.target.value }))}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Reached By (Employee)</label>
+                      <input
+                        type="text"
+                        value={editForm.reachedBy}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, reachedBy: e.target.value }))}
+                        placeholder="e.g. Ryan"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        checked={editForm.hasOutreach}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, hasOutreach: e.target.checked }))}
+                      />
+                      <span className="text-sm text-gray-700">Already reached out</span>
+                    </label>
+                    <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                        checked={editForm.isBusiness}
+                        onChange={(e) => setEditForm((prev) => ({ ...prev, isBusiness: e.target.checked }))}
+                      />
+                      <span className="text-sm text-gray-700">Business email</span>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={closeEditModal}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                      disabled={editSaving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={editSaving}
+                      className="inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {editSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      {editSaving ? 'Saving...' : 'Save changes'}
+                    </button>
+                  </div>
+                </form>
               </div>
-              <button onClick={closeEditModal} className="text-gray-500 hover:text-gray-700" aria-label="Close edit modal">
-                <X className="w-5 h-5" />
-              </button>
             </div>
-            <form onSubmit={handleEditSubmit} className="px-6 py-6 space-y-6">
-              {editError && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{editError}</div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
-                  <input
-                    type="text"
-                    value={editForm.displayName}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, displayName: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    placeholder="Creator name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={editForm.email}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    placeholder="creator@email.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                  <input
-                    type="text"
-                    value={editForm.country}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, country: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    placeholder="United States"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Followers</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={editForm.followers}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, followers: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    placeholder="150000"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Average Views</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={editForm.avgViews}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, avgViews: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    placeholder="50000"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Engagement Rate (%)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={editForm.engagementRate}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, engagementRate: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    placeholder="1.25"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Last Outreach Date</label>
-                  <input
-                    type="date"
-                    value={editForm.lastOutreachAt}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, lastOutreachAt: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Reached By (Employee)</label>
-                  <input
-                    type="text"
-                    value={editForm.reachedBy}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, reachedBy: e.target.value }))}
-                    placeholder="e.g. Ryan"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                    checked={editForm.hasOutreach}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, hasOutreach: e.target.checked }))}
-                  />
-                  <span className="text-sm text-gray-700">Already reached out</span>
-                </label>
-                <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                    checked={editForm.isBusiness}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, isBusiness: e.target.checked }))}
-                  />
-                  <span className="text-sm text-gray-700">Business email</span>
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={closeEditModal}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
-                  disabled={editSaving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={editSaving}
-                  className="inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {editSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  {editSaving ? 'Saving...' : 'Save changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+          )}
           {loadingInfluencers ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
@@ -1281,10 +1237,10 @@ export default function InfluencersPage() {
                         <td className="px-6 py-4 text-sm">
                           {(() => {
                             // Get profile URL from profile_url field or metadata
-                            const profileUrl = influencer.profile_url || 
-                                             influencer.metadata?.raw_author?.profileUrl ||
-                                             `https://www.tiktok.com/@${influencer.username}`;
-                            
+                            const profileUrl = influencer.profile_url ||
+                              influencer.metadata?.raw_author?.profileUrl ||
+                              `https://www.tiktok.com/@${influencer.username}`;
+
                             return (
                               <a
                                 href={profileUrl}
@@ -1306,18 +1262,18 @@ export default function InfluencersPage() {
                               <Edit2 className="w-4 h-4" />
                               Edit
                             </button>
-                          <button
-                            onClick={() => handleDeleteInfluencer(influencer.id)}
-                            disabled={deletingId === influencer.id}
+                            <button
+                              onClick={() => handleDeleteInfluencer(influencer.id)}
+                              disabled={deletingId === influencer.id}
                               className="inline-flex items-center justify-center p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Delete influencer"
-                          >
-                            {deletingId === influencer.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
-                          </button>
+                              title="Delete influencer"
+                            >
+                              {deletingId === influencer.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1325,7 +1281,7 @@ export default function InfluencersPage() {
                   </tbody>
                 </table>
               </div>
-              
+
               {/* Pagination Controls */}
               {totalPages > 1 && (
                 <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
@@ -1341,7 +1297,7 @@ export default function InfluencersPage() {
                       <ChevronLeft className="w-4 h-4" />
                       Previous
                     </button>
-                    
+
                     <div className="flex items-center gap-1">
                       {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
                         let pageNum: number;
@@ -1354,23 +1310,22 @@ export default function InfluencersPage() {
                         } else {
                           pageNum = currentPage - 3 + i;
                         }
-                        
+
                         return (
                           <button
                             key={pageNum}
                             onClick={() => handlePageChange(pageNum)}
-                            className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                              currentPage === pageNum
+                            className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${currentPage === pageNum
                                 ? 'bg-primary-600 text-white'
                                 : 'text-gray-700 hover:bg-gray-100'
-                            }`}
+                              }`}
                           >
                             {pageNum}
                           </button>
                         );
                       })}
                     </div>
-                    
+
                     <button
                       onClick={() => handlePageChange(currentPage + 1)}
                       disabled={currentPage === totalPages}
@@ -1399,10 +1354,10 @@ export default function InfluencersPage() {
                 </button>
               ) : (
                 <button
-                  onClick={() => setActiveTab('import')}
+                  onClick={clearFilters}
                   className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
                 >
-                  Go to Import
+                  Clear Filters
                 </button>
               )}
             </div>
@@ -1418,7 +1373,7 @@ export default function InfluencersPage() {
               <BarChart3 className="w-6 h-6" />
               Analytics & Visualizations
             </h2>
-            
+
             {allInfluencers.length === 0 ? (
               <div className="text-center py-12">
                 <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -1486,14 +1441,14 @@ export default function InfluencersPage() {
                     <BarChart data={(() => {
                       const buckets = [0, 1, 2, 3, 5, 10, 20, 50];
                       const counts = buckets.map((_, i) => ({
-                        range: i === 0 ? '0-1%' : 
-                               i === buckets.length - 1 ? `${buckets[i-1]}+%` :
-                               `${buckets[i-1]}-${buckets[i]}%`,
+                        range: i === 0 ? '0-1%' :
+                          i === buckets.length - 1 ? `${buckets[i - 1]}+%` :
+                            `${buckets[i - 1]}-${buckets[i]}%`,
                         count: allInfluencers.filter(inf => {
                           const rate = inf.engagement_rate || 0;
                           if (i === 0) return rate >= 0 && rate < 1;
-                          if (i === buckets.length - 1) return rate >= buckets[i-1];
-                          return rate >= buckets[i-1] && rate < buckets[i];
+                          if (i === buckets.length - 1) return rate >= buckets[i - 1];
+                          return rate >= buckets[i - 1] && rate < buckets[i];
                         }).length
                       }));
                       return counts;
@@ -1549,29 +1504,29 @@ export default function InfluencersPage() {
                   <ResponsiveContainer width="100%" height={400}>
                     <ScatterChart>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        type="number" 
-                        dataKey="followers" 
+                      <XAxis
+                        type="number"
+                        dataKey="followers"
                         name="Followers"
                         label={{ value: 'Followers', position: 'insideBottom', offset: -5 }}
                         scale="log"
                         domain={['dataMin', 'dataMax']}
                       />
-                      <YAxis 
-                        type="number" 
-                        dataKey="engagement" 
+                      <YAxis
+                        type="number"
+                        dataKey="engagement"
                         name="Engagement Rate (%)"
                         label={{ value: 'Engagement Rate (%)', angle: -90, position: 'insideLeft' }}
                       />
                       <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-                      <Scatter 
-                        name="Influencers" 
+                      <Scatter
+                        name="Influencers"
                         data={allInfluencers
                           .filter(inf => inf.engagement_rate && inf.followers && inf.followers > 0)
                           .map(inf => ({
                             followers: inf.followers || 0,
                             engagement: inf.engagement_rate || 0
-                          }))} 
+                          }))}
                         fill="#3b82f6"
                       />
                     </ScatterChart>
@@ -1586,13 +1541,13 @@ export default function InfluencersPage() {
                       const buckets = [0, 10000, 50000, 100000, 500000, 1000000, 5000000];
                       return buckets.map((_, i) => ({
                         range: i === 0 ? '0-10K' :
-                               i === buckets.length - 1 ? `${buckets[i-1]/1000}K+` :
-                               `${buckets[i-1]/1000}K-${buckets[i]/1000}K`,
+                          i === buckets.length - 1 ? `${buckets[i - 1] / 1000}K+` :
+                            `${buckets[i - 1] / 1000}K-${buckets[i] / 1000}K`,
                         count: allInfluencers.filter(inf => {
                           const followers = inf.followers || 0;
                           if (i === 0) return followers >= 0 && followers < 10000;
-                          if (i === buckets.length - 1) return followers >= buckets[i-1];
-                          return followers >= buckets[i-1] && followers < buckets[i];
+                          if (i === buckets.length - 1) return followers >= buckets[i - 1];
+                          return followers >= buckets[i - 1] && followers < buckets[i];
                         }).length
                       }));
                     })()}>
@@ -1610,206 +1565,7 @@ export default function InfluencersPage() {
         </div>
       )}
 
-      {/* Import/Export Tab - Keep existing code */}
-      {activeTab === 'import' && (
-        <div>
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-red-900">Error</h3>
-                <p className="text-sm text-red-700">{error}</p>
-              </div>
-            </div>
-          )}
 
-          {importResult && (
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-semibold text-green-900 mb-2">Import Successful</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <p className="text-gray-600">Total Rows</p>
-                      <p className="text-lg font-semibold text-gray-900">{importResult.total_rows}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Imported</p>
-                      <p className="text-lg font-semibold text-green-600">{importResult.imported}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Updated</p>
-                      <p className="text-lg font-semibold text-blue-600">{importResult.updated}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-600">Failed</p>
-                      <p className="text-lg font-semibold text-red-600">{importResult.failed}</p>
-                    </div>
-                  </div>
-                  {importResult.errors && importResult.errors.length > 0 && (
-                    <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
-                      <p className="text-sm font-medium text-yellow-900 mb-1">Errors:</p>
-                      <ul className="text-xs text-yellow-800 space-y-1">
-                        {importResult.errors.map((err: string, idx: number) => (
-                          <li key={idx}>• {err}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Import Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
-                  <Upload className="w-6 h-6 text-primary-600" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">Import Influencers</h2>
-                  <p className="text-sm text-gray-600">Upload CSV or Excel file</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-primary-500 transition-colors">
-                  <input
-                    type="file"
-                    id="file-upload"
-                    accept=".csv,.xlsx,.xls"
-                    onChange={handleFileUpload}
-                    disabled={importing}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="file-upload"
-                    className="cursor-pointer flex flex-col items-center gap-2"
-                  >
-                    {importing ? (
-                      <>
-                        <Loader2 className="w-10 h-10 text-primary-600 animate-spin" />
-                        <p className="text-sm font-medium text-gray-900">Importing...</p>
-                      </>
-                    ) : (
-                      <>
-                        <FileSpreadsheet className="w-10 h-10 text-gray-400" />
-                        <p className="text-sm font-medium text-gray-900">
-                          Click to upload or drag and drop
-                        </p>
-                        <p className="text-xs text-gray-500">CSV or Excel (XLSX, XLS)</p>
-                      </>
-                    )}
-                  </label>
-                </div>
-
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Download Template</h3>
-                  <p className="text-xs text-gray-600 mb-3">
-                    Use our template to ensure correct formatting
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => downloadTemplate('csv')}
-                      className="flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                    >
-                      CSV Template
-                    </button>
-                    <button
-                      onClick={() => downloadTemplate('excel')}
-                      className="flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                    >
-                      Excel Template
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                  <h3 className="text-sm font-semibold text-blue-900 mb-2">Required Fields</h3>
-                  <ul className="text-xs text-blue-800 space-y-1">
-                    <li>• <strong>username</strong> - TikTok username (required)</li>
-                  </ul>
-                  <h3 className="text-sm font-semibold text-blue-900 mt-3 mb-2">Optional Fields</h3>
-                  <ul className="text-xs text-blue-800 space-y-1">
-                    <li>• display_name, tiktok_id, profile_url, bio</li>
-                    <li>• followers, total_likes, avg_views, engagement_rate</li>
-                    <li>• email, is_business, country</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            {/* Export Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Download className="w-6 h-6 text-green-600" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">Export Influencers</h2>
-                  <p className="text-sm text-gray-600">Download your database</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Export Format</h3>
-                  <div className="space-y-3">
-                    <button
-                      onClick={() => handleExport('csv')}
-                      disabled={exporting}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {exporting ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Exporting...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-5 h-5" />
-                          Export as CSV
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => handleExport('excel')}
-                      disabled={exporting}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {exporting ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Exporting...
-                        </>
-                      ) : (
-                        <>
-                          <FileSpreadsheet className="w-5 h-5" />
-                          Export as Excel
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                  <h3 className="text-sm font-semibold text-green-900 mb-2">Export Includes</h3>
-                  <ul className="text-xs text-green-800 space-y-1">
-                    <li>• All influencer profile data</li>
-                    <li>• Engagement metrics and stats</li>
-                    <li>• Contact information (email)</li>
-                    <li>• Location and business status</li>
-                    <li>• Created and last scraped dates</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
