@@ -161,7 +161,7 @@ export default function ReferenceOrdersPage() {
   const [totalRecords, setTotalRecords] = useState(0);
   const [selectedCreators, setSelectedCreators] = useState<Record<string, { display: string; handle: string }>>({});
   const [avgViewJobs, setAvgViewJobs] = useState<AvgViewJob[]>([]);
-  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsLoading, setJobsLoading] = useState(true); // Start as true to disable buttons during initial load
   const [avgViewProcessing, setAvgViewProcessing] = useState(false);
   const recentAvgViewJobs = useMemo(() => avgViewJobs.slice(0, 5), [avgViewJobs]);
 
@@ -921,20 +921,20 @@ export default function ReferenceOrdersPage() {
                   </button>
                   <button
                     onClick={() => handleStartAvgViewJob('manual')}
-                    disabled={selectedCreatorCount === 0 || avgViewProcessing || hasRunningJob}
+                    disabled={selectedCreatorCount === 0 || avgViewProcessing || hasRunningJob || jobsLoading}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={hasRunningJob ? 'A job is already running' : ''}
+                    title={hasRunningJob ? 'A job is already running' : jobsLoading ? 'Loading jobs...' : ''}
                   >
-                    {avgViewProcessing || hasRunningJob ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                    {avgViewProcessing || hasRunningJob || jobsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
                     Calculate Selected
                   </button>
                   <button
                     onClick={() => handleStartAvgViewJob('all')}
-                    disabled={avgViewProcessing || hasRunningJob}
+                    disabled={avgViewProcessing || hasRunningJob || jobsLoading}
                     className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={hasRunningJob ? 'A job is already running' : ''}
+                    title={hasRunningJob ? 'A job is already running' : jobsLoading ? 'Loading jobs...' : ''}
                   >
-                    {avgViewProcessing || hasRunningJob ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {avgViewProcessing || hasRunningJob || jobsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                     Calculate All Creators
                   </button>
                 </div>
