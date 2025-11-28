@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3 } from 'lucide-react';
+import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { importReferenceOrders, ReferenceImportResult } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -20,6 +20,7 @@ interface ReferenceOrderRow {
   final_price?: number;
   price_per_video?: number;
   songs?: string;
+  video_links?: string;
   paid?: boolean;
   date_paid?: string;
   total_orders?: number;
@@ -176,6 +177,8 @@ export default function ReferenceOrdersPage() {
   const [matchedFilter, setMatchedFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [sortBy, setSortBy] = useState('date_paid');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -217,6 +220,7 @@ export default function ReferenceOrdersPage() {
       totalFeePerImport: '',
       videoCount: '',
       songs: '',
+      videoLinks: '',
       datePaid: '',
       approvedVendor: false,
       paid: true,
@@ -246,6 +250,8 @@ export default function ReferenceOrdersPage() {
       if (matchedFilter) params.append('matched', matchedFilter);
       if (dateFrom) params.append('date_from', dateFrom);
       if (dateTo) params.append('date_to', dateTo);
+      if (sortBy) params.append('sort_by', sortBy);
+      if (sortOrder) params.append('sort_order', sortOrder);
 
       const response = await fetch(`/api/reference-orders?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to load reference orders');
@@ -347,7 +353,7 @@ export default function ReferenceOrdersPage() {
   useEffect(() => {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, ownerFilter, approvedFilter, paidFilter, matchedFilter, dateFrom, dateTo, currentPage]);
+  }, [search, ownerFilter, approvedFilter, paidFilter, matchedFilter, dateFrom, dateTo, sortBy, sortOrder, currentPage]);
 
   useEffect(() => {
     loadSongAnalytics({ background: true });
@@ -556,6 +562,18 @@ export default function ReferenceOrdersPage() {
     }
   };
 
+  const toggleSort = (column: string) => {
+    if (sortBy === column) {
+      // Toggle order
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New column, default to descending
+      setSortBy(column);
+      setSortOrder('desc');
+    }
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
+
   const clearFilters = () => {
     setSearch('');
     setOwnerFilter('');
@@ -605,6 +623,7 @@ export default function ReferenceOrdersPage() {
       totalFeePerImport: toNumber(manualOrder.totalFeePerImport),
       videoCount: manualOrder.videoCount ? Number(manualOrder.videoCount) : null,
       songs: manualOrder.songs?.trim() || null,
+      videoLinks: manualOrder.videoLinks?.trim() || null,
       datePaid: manualOrder.datePaid || null,
       approvedVendor: manualOrder.approvedVendor,
       paid: manualOrder.paid,
@@ -649,6 +668,7 @@ export default function ReferenceOrdersPage() {
       totalFeePerImport: toInputValue(order.total_fee_per_import),
       videoCount: toInputValue(order.video_count),
       songs: order.songs || '',
+      videoLinks: order.video_links || '',
       datePaid: formatDateForInput(order.date_paid),
       approvedVendor: Boolean(order.approved_vendor),
       paid: Boolean(order.paid),
@@ -681,6 +701,7 @@ export default function ReferenceOrdersPage() {
       totalFeePerImport: editForm.totalFeePerImport,
       videoCount: editForm.videoCount,
       songs: editForm.songs,
+      videoLinks: editForm.videoLinks,
       datePaid: editForm.datePaid,
       approvedVendor: editForm.approvedVendor,
       paid: editForm.paid,
@@ -1190,13 +1211,45 @@ export default function ReferenceOrdersPage() {
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Select</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Creator</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Owner</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
+                            <button
+                              onClick={() => toggleSort('owner_name')}
+                              className="inline-flex items-center gap-1 hover:text-primary-600 transition-colors"
+                            >
+                              Owner
+                              {sortBy === 'owner_name' ? (
+                                sortOrder === 'asc' ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </button>
+                          </th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Date Paid</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Price / Video</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Approved</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Paid</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Account</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Avg Views</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
+                            <button
+                              onClick={() => toggleSort('avg_views')}
+                              className="inline-flex items-center gap-1 hover:text-primary-600 transition-colors"
+                            >
+                              Avg Views
+                              {sortBy === 'avg_views' ? (
+                                sortOrder === 'asc' ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </button>
+                          </th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
                         </tr>
                       </thead>
@@ -1682,6 +1735,17 @@ export default function ReferenceOrdersPage() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Video Links</label>
+                  <textarea
+                    value={manualOrder.videoLinks}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, videoLinks: e.target.value }))}
+                    placeholder="Paste video URLs here (one per line)&#10;https://www.tiktok.com/@creator/video/123456789&#10;https://www.tiktok.com/@creator/video/987654321"
+                    rows={3}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-mono text-sm"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Add TikTok video URLs to track delivered content (one URL per line)</p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date Paid</label>
                   <input
@@ -1862,6 +1926,17 @@ export default function ReferenceOrdersPage() {
                     placeholder="Artist - Song"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Video Links</label>
+                  <textarea
+                    value={editForm.videoLinks}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, videoLinks: e.target.value }))}
+                    placeholder="Paste video URLs here (one per line)&#10;https://www.tiktok.com/@creator/video/123456789&#10;https://www.tiktok.com/@creator/video/987654321"
+                    rows={3}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-mono text-sm"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Add TikTok video URLs to track delivered content (one URL per line)</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date Paid</label>
