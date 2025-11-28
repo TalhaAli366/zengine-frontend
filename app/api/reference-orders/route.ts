@@ -107,61 +107,116 @@ export async function GET(request: NextRequest) {
     const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'date_paid';
     const ascending = sortOrder === 'asc';
 
-    // For avg_views, we'll sort after joining with avg views data
-    if (sortBy !== 'avg_views') {
-      query = query.order(sortColumn, { ascending, nullsFirst: false });
-    } else {
-      // Default sort by date_paid when sorting by avg_views (will be re-sorted later)
-      query = query.order('date_paid', { ascending: false, nullsFirst: false });
-    }
+    let data: any[] = [];
+    let count = 0;
 
-    const { data, error, count } = await query.range(offset, offset + limit - 1);
-    if (error) throw error;
-
-    const normalizedUsernames = Array.from(
-      new Set((data || []).map((row) => row.normalized_username).filter(Boolean)),
-    );
-
-    let avgViewMap: Record<
-      string,
-      { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }
-    > = {};
-    if (normalizedUsernames.length) {
-      const { data: avgRows, error: avgError } = await supabase
-        .from('reference_creator_avg_views')
-        .select('normalized_username, avg_views, status, last_calculated_at')
-        .in('normalized_username', normalizedUsernames);
-
-      if (avgError) throw avgError;
-      avgViewMap = (avgRows || []).reduce((acc, row) => {
-        const normalized = row.normalized_username;
-        if (!normalized) return acc;
-        acc[normalized] = {
-          avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
-          status: row.status,
-          last_calculated_at: row.last_calculated_at,
-        };
-        return acc;
-      }, {} as typeof avgViewMap);
-    }
-
-    let enrichedOrders = (data || []).map((row) => {
-      const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
-      return {
-        ...row,
-        avg_views: avgViewEntry?.avg_views ?? null,
-        avg_views_status: avgViewEntry?.status ?? null,
-        avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
-      };
-    });
-
-    // Apply avg_views sorting if requested (client-side since it's from a separate table)
+    // For avg_views sorting, we need to fetch all, join, sort, then paginate
     if (sortBy === 'avg_views') {
-      enrichedOrders = enrichedOrders.sort((a, b) => {
+      // Fetch ALL matching records (without pagination) to sort them properly
+      const { data: allData, error: allError, count: totalCount } = await query;
+      if (allError) throw allError;
+
+      count = totalCount || 0;
+
+      // Get all normalized usernames
+      const normalizedUsernames = Array.from(
+        new Set((allData || []).map((row) => row.normalized_username).filter(Boolean)),
+      );
+
+      let avgViewMap: Record<
+        string,
+        { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }
+      > = {};
+
+      if (normalizedUsernames.length) {
+        const { data: avgRows, error: avgError } = await supabase
+          .from('reference_creator_avg_views')
+          .select('normalized_username, avg_views, status, last_calculated_at')
+          .in('normalized_username', normalizedUsernames);
+
+        if (avgError) throw avgError;
+        avgViewMap = (avgRows || []).reduce((acc, row) => {
+          const normalized = row.normalized_username;
+          if (!normalized) return acc;
+          acc[normalized] = {
+            avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+            status: row.status,
+            last_calculated_at: row.last_calculated_at,
+          };
+          return acc;
+        }, {} as typeof avgViewMap);
+      }
+
+      // Enrich all data with avg_views
+      const enrichedAll = (allData || []).map((row) => {
+        const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+        return {
+          ...row,
+          avg_views: avgViewEntry?.avg_views ?? null,
+          avg_views_status: avgViewEntry?.status ?? null,
+          avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+        };
+      });
+
+      // Sort by avg_views
+      enrichedAll.sort((a, b) => {
         const aVal = a.avg_views ?? -1;
         const bVal = b.avg_views ?? -1;
         return ascending ? aVal - bVal : bVal - aVal;
       });
+
+      // Apply pagination to sorted data
+      data = enrichedAll.slice(offset, offset + limit);
+    } else {
+      // For other columns, use database sorting (more efficient)
+      query = query.order(sortColumn, { ascending, nullsFirst: false });
+      const { data: queryData, error: queryError, count: queryCount } = await query.range(offset, offset + limit - 1);
+      if (queryError) throw queryError;
+
+      data = queryData || [];
+      count = queryCount || 0;
+
+      // Enrich with avg_views
+      const normalizedUsernames = Array.from(
+        new Set((data || []).map((row) => row.normalized_username).filter(Boolean)),
+      );
+
+      if (normalizedUsernames.length) {
+        const { data: avgRows, error: avgError } = await supabase
+          .from('reference_creator_avg_views')
+          .select('normalized_username, avg_views, status, last_calculated_at')
+          .in('normalized_username', normalizedUsernames);
+
+        if (avgError) throw avgError;
+
+        const avgViewMap = (avgRows || []).reduce((acc, row) => {
+          const normalized = row.normalized_username;
+          if (!normalized) return acc;
+          acc[normalized] = {
+            avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+            status: row.status,
+            last_calculated_at: row.last_calculated_at,
+          };
+          return acc;
+        }, {} as Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }>);
+
+        data = data.map((row) => {
+          const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+          return {
+            ...row,
+            avg_views: avgViewEntry?.avg_views ?? null,
+            avg_views_status: avgViewEntry?.status ?? null,
+            avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+          };
+        });
+      } else {
+        data = data.map((row) => ({
+          ...row,
+          avg_views: null,
+          avg_views_status: null,
+          avg_views_updated_at: null,
+        }));
+      }
     }
 
     const { data: summaryRow } = await supabase
@@ -176,7 +231,7 @@ export async function GET(request: NextRequest) {
       .limit(6);
 
     return Response.json({
-      data: enrichedOrders,
+      data: data,
       total: count || 0,
       page,
       limit,
