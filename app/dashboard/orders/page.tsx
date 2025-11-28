@@ -227,6 +227,11 @@ export default function ReferenceOrdersPage() {
   const [editForm, setEditForm] = useState({ ...manualOrderDefaults });
   const selectedCreatorCount = Object.keys(selectedCreators).length;
 
+  // Check if there's a running or pending job
+  const hasRunningJob = useMemo(() => {
+    return avgViewJobs.some((job) => job.status === 'pending' || job.status === 'running');
+  }, [avgViewJobs]);
+
   const loadOrders = async () => {
     try {
       setLoading(true);
@@ -307,9 +312,9 @@ export default function ReferenceOrdersPage() {
       const response = await fetch('/api/songs-analytics', {
         method: 'POST',
       });
-      
+
       if (!response.ok) throw new Error('Failed to refresh cache');
-      
+
       // Reload data after refresh
       await loadSongAnalytics({ refresh: true });
       setBanner({ type: 'success', message: 'Song analytics refreshed successfully' });
@@ -321,9 +326,11 @@ export default function ReferenceOrdersPage() {
     }
   };
 
-  const loadAvgViewJobs = async () => {
+  const loadAvgViewJobs = async (silent = false) => {
     try {
-      setJobsLoading(true);
+      if (!silent) {
+        setJobsLoading(true);
+      }
       const response = await fetch(`${API_URL}/api/v1/reference-orders/avg-views/jobs?limit=5`);
       if (!response.ok) throw new Error('Failed to load avg view jobs');
       const data = await response.json();
@@ -331,7 +338,9 @@ export default function ReferenceOrdersPage() {
     } catch (err) {
       console.error('Error loading avg view jobs:', err);
     } finally {
-      setJobsLoading(false);
+      if (!silent) {
+        setJobsLoading(false);
+      }
     }
   };
 
@@ -360,10 +369,14 @@ export default function ReferenceOrdersPage() {
   }, [filteredSongs.length, songPage]);
 
   useEffect(() => {
+    // Initial load (with loading state)
     loadAvgViewJobs();
+
+    // Poll every 30 seconds silently in the background
     const interval = setInterval(() => {
-      loadAvgViewJobs();
-    }, 15000);
+      loadAvgViewJobs(true); // Silent polling - no loading indicator
+    }, 30000); // Increased from 15s to 30s
+
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -380,11 +393,11 @@ export default function ReferenceOrdersPage() {
       const result = await importReferenceOrders(file);
       setImportResult(result);
       await loadOrders();
-      
+
       // Auto-refresh song analytics cache after import
       if (result.inserted > 0) {
         console.log('Auto-refreshing song analytics after import...');
-        fetch('/api/songs-analytics', { method: 'POST' }).catch(err => 
+        fetch('/api/songs-analytics', { method: 'POST' }).catch(err =>
           console.error('Failed to auto-refresh song cache:', err)
         );
       }
@@ -513,6 +526,17 @@ export default function ReferenceOrdersPage() {
       if (!response.ok) {
         throw new Error(data?.detail || data?.error || 'Failed to start avg view calculation');
       }
+
+      // Check if a job is already running
+      if (data.already_running) {
+        setBanner({
+          type: 'error',
+          message: data.message || 'A job is already running. Please wait for it to complete.',
+        });
+        loadAvgViewJobs(); // Refresh jobs list to show the running job
+        return;
+      }
+
       setBanner({
         type: 'success',
         message:
@@ -692,1020 +716,1025 @@ export default function ReferenceOrdersPage() {
   return (
     <>
       <div>
-      <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Orders</h1>
-          <p className="text-gray-600">
-            Track historical collaborations, pricing, and owner activity for scraped influencers.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={openManualModal}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Order
-          </button>
-          <label className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg cursor-pointer hover:bg-primary-700 transition-colors">
-            {importing ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Importing...
-              </>
-            ) : (
-              <>
-                <Upload className="w-4 h-4 mr-2" />
-                Import Reference Sheet
-              </>
-            )}
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              className="hidden"
-              onChange={handleFileUpload}
-              disabled={importing}
-            />
-          </label>
-        </div>
-      </div>
-
-      {/* Google Sheet sync */}
-      <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2 justify-between">
+        <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
           <div>
-            <p className="text-sm font-medium text-gray-900">Sync from Google Sheet</p>
-            <p className="text-xs text-gray-600">
-              Paste the public URL of your orders Google Sheet (with a <code>created_at</code> column). Only rows
-              added after the last sync will be imported.
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Orders</h1>
+            <p className="text-gray-600">
+              Track historical collaborations, pricing, and owner activity for scraped influencers.
             </p>
-          </div>
-          {lastSheetSyncAt && (
-            <p className="text-xs text-gray-500">
-              Last sync:{' '}
-              {new Date(lastSheetSyncAt).toLocaleString()}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-3 items-center">
-          <input
-            type="text"
-            value={sheetUrl}
-            onChange={(e) => setSheetUrl(e.target.value)}
-            placeholder="https://docs.google.com/spreadsheets/d/..."
-            className="flex-1 min-w-[240px] rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white"
-          />
-          <button
-            type="button"
-            onClick={handleSyncFromSheet}
-            disabled={syncingSheet}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {syncingSheet ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Syncing...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-4 h-4" />
-                Sync New Rows
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-4 mb-6 border-b border-gray-200">
-          <button
-          onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${
-            activeTab === 'orders'
-              ? 'border-primary-600 text-primary-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Orders List ({totalRecords})
-        </button>
-        <button
-          onClick={() => setActiveTab('songs')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${
-            activeTab === 'songs'
-              ? 'border-primary-600 text-primary-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          <Music className="w-4 h-4" />
-          Song Analytics ({songTotals.total_songs})
-          </button>
-      </div>
-
-      {importResult && (
-        <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-green-900">Import Completed</p>
-            <p className="text-sm text-green-800">
-              Added {importResult.inserted} new rows. Skipped {importResult.skipped} duplicates out of {importResult.total_rows} rows.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {banner && (
-        <div
-          className={`mb-4 p-4 border rounded-lg flex items-start gap-3 ${
-            banner.type === 'success'
-              ? 'bg-blue-50 border-blue-200 text-blue-900'
-              : 'bg-red-50 border-red-200 text-red-900'
-          }`}
-        >
-          <CheckCircle2
-            className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-              banner.type === 'success' ? 'text-blue-600' : 'text-red-600'
-            }`}
-          />
-          <div className="flex-1">
-            <p className="font-semibold">
-              {banner.type === 'success' ? 'Success' : 'Something went wrong'}
-            </p>
-            <p className="text-sm">{banner.message}</p>
-          </div>
-          <button
-            className={`${banner.type === 'success' ? 'text-blue-500 hover:text-blue-700' : 'text-red-500 hover:text-red-700'}`}
-            onClick={() => setBanner(null)}
-            aria-label="Dismiss message"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-red-900">Error</p>
-            <p className="text-sm text-red-800">{error}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Orders Tab */}
-      {activeTab === 'orders' && (
-        <>
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-sm text-gray-500 mb-1">Total Orders</p>
-          <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(stats.totalOrders)}</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-sm text-gray-500 mb-1">Unique Creators</p>
-          <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(stats.totalCreators)}</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-sm text-gray-500 mb-1">Average Price / Video</p>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrencyValue(stats.avgPricePerVideo)}</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-sm text-gray-500 mb-1">Total Spend</p>
-          <p className="text-2xl font-bold text-gray-900">{formatCurrencyValue(stats.totalSpend)}</p>
-        </div>
-      </div>
-
-      {/* Avg Views Controls */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Avg Views Calculator</h3>
-            <p className="text-sm text-gray-600">
-              Select creators from the table (unique selection) or queue all {numberFormatter.format(stats.totalCreators || 0)} creators.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={handleSelectPageCreators}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
-            >
-              Select Page Creators
-            </button>
-            <button
-              onClick={handleClearSelectedCreators}
-              disabled={selectedCreatorCount === 0}
-              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Clear Selection
-            </button>
-            <button
-              onClick={() => handleStartAvgViewJob('manual')}
-              disabled={selectedCreatorCount === 0 || avgViewProcessing}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {avgViewProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
-              Calculate Selected
-            </button>
-            <button
-              onClick={() => handleStartAvgViewJob('all')}
-              disabled={avgViewProcessing}
-              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {avgViewProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Calculate All Creators
-            </button>
-          </div>
-        </div>
-        <p className="text-sm text-gray-600 mt-3">
-          Selected creators:{' '}
-          <span className="font-semibold text-gray-900">{numberFormatter.format(selectedCreatorCount)}</span>. Previously
-          processed creators are skipped automatically.
-        </p>
-      </div>
-
-      {/* Recent Avg View Jobs */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Recent Avg View Jobs</h3>
-            <p className="text-sm text-gray-500">Track long running Apify batches.</p>
-          </div>
-          <button
-            onClick={loadAvgViewJobs}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </button>
-        </div>
-        {jobsLoading ? (
-          <div className="flex items-center justify-center py-6">
-            <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
-          </div>
-        ) : recentAvgViewJobs.length === 0 ? (
-          <p className="text-sm text-gray-500">No avg view jobs have been queued yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600">
-                  <th className="px-4 py-3">Mode</th>
-                  <th className="px-4 py-3">Requested</th>
-                  <th className="px-4 py-3">Processed</th>
-                  <th className="px-4 py-3">Skipped</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentAvgViewJobs.map((job) => (
-                  <tr key={job.id} className="border-b border-gray-100 last:border-0">
-                    <td className="px-4 py-3 text-gray-700 capitalize">{job.mode || 'manual'}</td>
-                    <td className="px-4 py-3 text-gray-900 font-medium">
-                      {numberFormatter.format(job.total_requested ?? 0)}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {numberFormatter.format(job.total_processed ?? 0)}{' '}
-                      <span className="text-xs text-gray-500">
-                        / {numberFormatter.format(job.total_enqueued ?? job.total_requested ?? 0)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {numberFormatter.format(job.total_skipped ?? 0)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getJobStatusBadge(
-                          job.status,
-                        )}`}
-                      >
-                        {job.status}
-                      </span>
-                      {job.error_message && (
-                        <p className="text-xs text-red-500 mt-1 truncate max-w-[200px]">{job.error_message}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{formatDateValue(job.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
-        <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Filter className="w-5 h-5 text-gray-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => loadOrders()}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+              onClick={openManualModal}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
             >
-              <RefreshCw className="w-4 h-4" />
-              Refresh Orders
+              <Plus className="w-4 h-4" />
+              Add Order
             </button>
-          <button onClick={clearFilters} className="text-sm text-blue-600 hover:text-blue-700">
-            Clear filters
-          </button>
+            <label className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg cursor-pointer hover:bg-primary-700 transition-colors">
+              {importing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Import Reference Sheet
+                </>
+              )}
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={handleFileUpload}
+                disabled={importing}
+              />
+            </label>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Search Creator</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => {
-                  setCurrentPage(1);
-                  setSearch(e.target.value);
-                }}
-                placeholder="Username or link"
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-              />
+
+        {/* Google Sheet sync */}
+        <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2 justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Sync from Google Sheet</p>
+              <p className="text-xs text-gray-600">
+                Paste the public URL of your orders Google Sheet (with a <code>created_at</code> column). Only rows
+                added after the last sync will be imported.
+              </p>
             </div>
+            {lastSheetSyncAt && (
+              <p className="text-xs text-gray-500">
+                Last sync:{' '}
+                {new Date(lastSheetSyncAt).toLocaleString()}
+              </p>
+            )}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Owner / Employee</label>
+          <div className="flex flex-wrap gap-3 items-center">
             <input
               type="text"
-              value={ownerFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setOwnerFilter(e.target.value);
-              }}
-              placeholder="e.g. Ryan"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+              value={sheetUrl}
+              onChange={(e) => setSheetUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              className="flex-1 min-w-[240px] rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 bg-white"
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Approved Vendor</label>
-            <select
-              value={approvedFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setApprovedFilter(e.target.value);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-            >
-              <option value="">All</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
-            <select
-              value={paidFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setPaidFilter(e.target.value);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-            >
-              <option value="">All</option>
-              <option value="paid">Paid</option>
-              <option value="unpaid">Unpaid</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Matched to Scraper</label>
-            <select
-              value={matchedFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setMatchedFilter(e.target.value);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-            >
-              <option value="">All creators</option>
-              <option value="true">Matched influencers</option>
-              <option value="false">Not in database</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Date From</label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setDateFrom(e.target.value);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Date To</label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setDateTo(e.target.value);
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Owner leaderboard */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
-        <div className="flex items-center gap-2 mb-4">
-          <Users className="w-5 h-5 text-gray-600" />
-          <h3 className="text-lg font-semibold text-gray-900">Top Employees by Orders</h3>
-        </div>
-        {ownerStats.length === 0 ? (
-          <p className="text-sm text-gray-500">No owner data available yet.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {ownerStats.map((owner) => (
-              <div key={owner.owner_name} className="border border-gray-200 rounded-lg p-4">
-                <p className="text-sm text-gray-500">Owner</p>
-                <p className="text-lg font-semibold text-gray-900">{owner.owner_name || 'Unassigned'}</p>
-                <p className="text-sm text-gray-500">{owner.total_orders} orders</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Orders Table */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
-          </div>
-        ) : orders.length === 0 ? (
-          <div className="p-12 text-center">
-            <p className="text-gray-500 mb-2">No reference orders found.</p>
-            <p className="text-sm text-gray-400">
-              Try adjusting your filters or import the completed-orders sheet to populate this view.
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Select</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Creator</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Owner</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Date Paid</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Price / Video</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Approved</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Paid</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Account</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Avg Views</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.map((order) => {
-                    const normalized = normalizeHandle(order.normalized_username || order.username);
-                    const isSelected = normalized ? Boolean(selectedCreators[normalized]) : false;
-                    return (
-                      <tr key={order.id} className="border-b border-gray-100 last:border-b-0">
-                        <td className="px-4 py-4 text-sm">
-                          {normalized ? (
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 text-primary-600 border-gray-300 rounded"
-                              checked={isSelected}
-                              onChange={() => handleToggleCreatorSelection(order)}
-                            />
-                          ) : (
-                            <span className="text-xs text-gray-400">N/A</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4">
-                          <p className="text-sm font-semibold text-gray-900">@{order.username}</p>
-                          <p className="text-xs text-gray-500">{order.email || 'No email'}</p>
-                          {order.influencer_id ? (
-                            <span className="inline-flex items-center px-2 py-0.5 mt-1 bg-green-100 text-green-700 text-xs rounded-full">
-                              Matched
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 mt-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                              Not in DB
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">{order.owner_name || 'Unassigned'}</td>
-                        <td className="px-6 py-4 text-sm text-gray-700">
-                          <div className="flex items-center gap-2">
-                            <CalendarDays className="w-4 h-4 text-blue-500" />
-                            <span>{formatDateValue(order.date_paid)}</span>
-                          </div>
-                          {order.video_count ? (
-                            <p className="text-xs text-gray-500">{order.video_count} videos</p>
-                          ) : null}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">
-                          <div className="flex items-center gap-2">
-                            <DollarSign className="w-4 h-4 text-green-500" />
-                            <span>{formatCurrencyValue(order.price_per_video)}</span>
-                          </div>
-                          {order.final_price ? (
-                            <p className="text-xs text-gray-500">Total: {formatCurrencyValue(order.final_price)}</p>
-                          ) : null}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          <span
-                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              order.approved_vendor
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-gray-100 text-gray-600'
-                            }`}
-                          >
-                            {order.approved_vendor ? 'Yes' : 'No'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          <span
-                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                              order.paid ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
-                            }`}
-                          >
-                            {order.paid ? 'Paid' : 'Pending'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {order.account_link ? (
-                            <a
-                              href={order.account_link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              View
-                            </a>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          {order.avg_views ? (
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900">
-                                {numberFormatter.format(order.avg_views)}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Updated {formatDateValue(order.avg_views_updated_at)}
-                              </p>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-gray-500">
-                              {order.avg_views_status === 'no_data' ? 'No data yet' : 'Not calculated'}
-                            </p>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                            <button
-                              onClick={() => openEditModal(order)}
-                              className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-50"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteOrder(order.id)}
-                              disabled={deletingOrderId === order.id}
-                              className="inline-flex items-center gap-2 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {deletingOrderId === order.id ? (
-                                <>
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  Deleting...
-                                </>
-                              ) : (
-                                <>
-                                  <Trash2 className="w-4 h-4" />
-                                  Delete
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-              <p className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * limit + 1} – {Math.min(currentPage * limit, (currentPage - 1) * limit + orders.length)} of{' '}
-                {numberFormatter.format(totalRecords)} orders
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Prev
-                </button>
-                <span className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-      </>
-      )}
-
-      {/* Song Analytics Tab */}
-      {activeTab === 'songs' && (
-        <div>
-          {/* Refresh Button */}
-          <div className="flex justify-end mb-4">
             <button
-              onClick={handleRefreshSongAnalytics}
-              disabled={refreshingSongs}
-              className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+              onClick={handleSyncFromSheet}
+              disabled={syncingSheet}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {refreshingSongs ? (
+              {syncingSheet ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Refreshing Cache...
+                  Syncing...
                 </>
               ) : (
                 <>
                   <RefreshCw className="w-4 h-4" />
-                  Refresh Analytics
+                  Sync New Rows
                 </>
               )}
             </button>
           </div>
+        </div>
 
-          {/* Song Summary Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-sm text-gray-500 mb-1">Total Songs</p>
-              <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(songTotals.total_songs)}</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-sm text-gray-500 mb-1">Total Videos</p>
-              <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(songTotals.total_videos)}</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-sm text-gray-500 mb-1">Total Orders</p>
-              <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(songTotals.total_orders)}</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <p className="text-sm text-gray-500 mb-1">Total Spend</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {formatCurrencyValue(
-                  songAnalytics.reduce((sum, song) => sum + (song.total_spend || 0), 0)
-                )}
+        {/* Tabs */}
+        <div className="flex gap-4 mb-6 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'orders'
+              ? 'border-primary-600 text-primary-600'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <Users className="w-4 h-4" />
+            Orders List ({totalRecords})
+          </button>
+          <button
+            onClick={() => setActiveTab('songs')}
+            className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'songs'
+              ? 'border-primary-600 text-primary-600'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+          >
+            <Music className="w-4 h-4" />
+            Song Analytics ({songTotals.total_songs})
+          </button>
+        </div>
+
+        {importResult && (
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-green-900">Import Completed</p>
+              <p className="text-sm text-green-800">
+                Added {importResult.inserted} new rows. Skipped {importResult.skipped} duplicates out of {importResult.total_rows} rows.
               </p>
             </div>
           </div>
+        )}
 
-          {loadingSongs ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
+        {banner && (
+          <div
+            className={`mb-4 p-4 border rounded-lg flex items-start gap-3 ${banner.type === 'success'
+              ? 'bg-blue-50 border-blue-200 text-blue-900'
+              : 'bg-red-50 border-red-200 text-red-900'
+              }`}
+          >
+            <CheckCircle2
+              className={`w-5 h-5 flex-shrink-0 mt-0.5 ${banner.type === 'success' ? 'text-blue-600' : 'text-red-600'
+                }`}
+            />
+            <div className="flex-1">
+              <p className="font-semibold">
+                {banner.type === 'success' ? 'Success' : 'Something went wrong'}
+              </p>
+              <p className="text-sm">{banner.message}</p>
             </div>
-          ) : songAnalytics.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm p-12 text-center border border-gray-200">
-              <Music className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500 mb-2">No song data available</p>
-              <p className="text-sm text-gray-400">Import reference orders with song information to see analytics</p>
+            <button
+              className={`${banner.type === 'success' ? 'text-blue-500 hover:text-blue-700' : 'text-red-500 hover:text-red-700'}`}
+              onClick={() => setBanner(null)}
+              aria-label="Dismiss message"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-900">Error</p>
+              <p className="text-sm text-red-800">{error}</p>
             </div>
-          ) : (
-            <>
-              {/* Visualizations */}
-              <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="w-full md:max-w-md">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Search Song Name</label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={songSearch}
-                        onChange={(e) => {
-                          setSongPage(1);
-                          setSongSearch(e.target.value);
-                        }}
-                        placeholder="Type to filter by song name"
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 mt-2 md:mt-6">
-                    <button
-                      onClick={() => setSongSearch('')}
-                      disabled={!songSearch}
-                      className="text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed"
-                    >
-                      Clear search
-                    </button>
-                  </div>
-                </div>
+          </div>
+        )}
+
+        {/* Orders Tab */}
+        {activeTab === 'orders' && (
+          <>
+            {/* Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Total Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(stats.totalOrders)}</p>
               </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                {/* Orders by Song */}
-                <div className="bg-white border border-gray-200 rounded-xl p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Users className="w-5 h-5 text-green-600" />
-                    Orders by Song (Top 10)
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={filteredSongs.slice(0, 10)}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="song_name" angle={-45} textAnchor="end" height={120} />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="order_count" fill="#10b981" name="Orders" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Videos by Song */}
-                <div className="bg-white border border-gray-200 rounded-xl p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <BarChart3 className="w-5 h-5 text-blue-600" />
-                    Videos by Song (Top 10)
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={filteredSongs.slice(0, 10)}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="song_name" angle={-45} textAnchor="end" height={120} />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="total_videos" fill="#3b82f6" name="Total Videos" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Unique Creators</p>
+                <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(stats.totalCreators)}</p>
               </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Average Price / Video</p>
+                <p className="text-2xl font-bold text-gray-900">{formatCurrencyValue(stats.avgPricePerVideo)}</p>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Total Spend</p>
+                <p className="text-2xl font-bold text-gray-900">{formatCurrencyValue(stats.totalSpend)}</p>
+              </div>
+            </div>
 
-              {/* Song Breakdown Table */}
-              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-6">
-                <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Music className="w-5 h-5" />
-                    <h2 className="text-lg font-semibold text-gray-900">Song Breakdown</h2>
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    Showing {(songPage - 1) * SONGS_PER_PAGE + 1}-
-                    {Math.min(songPage * SONGS_PER_PAGE, filteredSongs.length)} of{' '}
-                    {numberFormatter.format(filteredSongs.length)}
+            {/* Avg Views Controls */}
+            <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Avg Views Calculator</h3>
+                  <p className="text-sm text-gray-600">
+                    Select creators from the table (unique selection) or queue all {numberFormatter.format(stats.totalCreators || 0)} creators.
                   </p>
                 </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleSelectPageCreators}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+                  >
+                    Select Page Creators
+                  </button>
+                  <button
+                    onClick={handleClearSelectedCreators}
+                    disabled={selectedCreatorCount === 0}
+                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Clear Selection
+                  </button>
+                  <button
+                    onClick={() => handleStartAvgViewJob('manual')}
+                    disabled={selectedCreatorCount === 0 || avgViewProcessing || hasRunningJob}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={hasRunningJob ? 'A job is already running' : ''}
+                  >
+                    {avgViewProcessing || hasRunningJob ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                    Calculate Selected
+                  </button>
+                  <button
+                    onClick={() => handleStartAvgViewJob('all')}
+                    disabled={avgViewProcessing || hasRunningJob}
+                    className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={hasRunningJob ? 'A job is already running' : ''}
+                  >
+                    {avgViewProcessing || hasRunningJob ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    Calculate All Creators
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600 mt-3">
+                Selected creators:{' '}
+                <span className="font-semibold text-gray-900">{numberFormatter.format(selectedCreatorCount)}</span>. Previously
+                processed creators are skipped automatically.
+              </p>
+              {hasRunningJob && (
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2">
+                  <Loader2 className="w-4 h-4 text-yellow-600 mt-0.5 animate-spin flex-shrink-0" />
+                  <p className="text-sm text-yellow-800">
+                    <span className="font-semibold">Job in progress:</span> Another avg view calculation job is currently running.
+                    Please wait for it to complete before starting a new one.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Recent Avg View Jobs */}
+            <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Recent Avg View Jobs</h3>
+                  <p className="text-sm text-gray-500">Track long running Apify batches.</p>
+                </div>
+                <button
+                  onClick={() => loadAvgViewJobs()}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Refresh
+                </button>
+              </div>
+              {jobsLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
+                </div>
+              ) : recentAvgViewJobs.length === 0 ? (
+                <p className="text-sm text-gray-500">No avg view jobs have been queued yet.</p>
+              ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Song Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Total Videos</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Number of Orders</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Avg Price/Video</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Total Spend</th>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600">
+                        <th className="px-4 py-3">Mode</th>
+                        <th className="px-4 py-3">Requested</th>
+                        <th className="px-4 py-3">Processed</th>
+                        <th className="px-4 py-3">Skipped</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Created</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {paginatedSongs.map((song, idx) => (
-                        <tr key={`${song.song_name}-${idx}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                          <td className="px-6 py-4 text-sm font-medium text-gray-900">{song.song_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{numberFormatter.format(song.total_videos)}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{song.order_count}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{formatCurrencyValue(song.avg_price_per_video)}</td>
-                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">{formatCurrencyValue(song.total_spend)}</td>
+                      {recentAvgViewJobs.map((job) => (
+                        <tr key={job.id} className="border-b border-gray-100 last:border-0">
+                          <td className="px-4 py-3 text-gray-700 capitalize">{job.mode || 'manual'}</td>
+                          <td className="px-4 py-3 text-gray-900 font-medium">
+                            {numberFormatter.format(job.total_requested ?? 0)}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {numberFormatter.format(job.total_processed ?? 0)}{' '}
+                            <span className="text-xs text-gray-500">
+                              / {numberFormatter.format(job.total_enqueued ?? job.total_requested ?? 0)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {numberFormatter.format(job.total_skipped ?? 0)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getJobStatusBadge(
+                                job.status,
+                              )}`}
+                            >
+                              {job.status}
+                            </span>
+                            {job.error_message && (
+                              <p className="text-xs text-red-500 mt-1 truncate max-w-[200px]">{job.error_message}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">{formatDateValue(job.created_at)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-white">
+              )}
+            </div>
+
+            {/* Filters */}
+            <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
+              <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Filter className="w-5 h-5 text-gray-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
+                </div>
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setSongPage((prev) => Math.max(1, prev - 1))}
-                    disabled={songPage === 1}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => loadOrders()}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
                   >
-                    Prev
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh Orders
                   </button>
-                  <span className="text-sm text-gray-600">
-                    Page {songPage} of {songPageCount}
-                  </span>
-                  <button
-                    onClick={() => setSongPage((prev) => Math.min(songPageCount, prev + 1))}
-                    disabled={songPage === songPageCount}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Next
+                  <button onClick={clearFilters} className="text-sm text-blue-600 hover:text-blue-700">
+                    Clear filters
                   </button>
                 </div>
               </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Search Creator</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(e) => {
+                        setCurrentPage(1);
+                        setSearch(e.target.value);
+                      }}
+                      placeholder="Username or link"
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Owner / Employee</label>
+                  <input
+                    type="text"
+                    value={ownerFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setOwnerFilter(e.target.value);
+                    }}
+                    placeholder="e.g. Ryan"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Approved Vendor</label>
+                  <select
+                    value={approvedFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setApprovedFilter(e.target.value);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  >
+                    <option value="">All</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
+                  <select
+                    value={paidFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setPaidFilter(e.target.value);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  >
+                    <option value="">All</option>
+                    <option value="paid">Paid</option>
+                    <option value="unpaid">Unpaid</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Matched to Scraper</label>
+                  <select
+                    value={matchedFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setMatchedFilter(e.target.value);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  >
+                    <option value="">All creators</option>
+                    <option value="true">Matched influencers</option>
+                    <option value="false">Not in database</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Date From</label>
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setDateFrom(e.target.value);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Date To</label>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setDateTo(e.target.value);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Owner leaderboard */}
+            <div className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
+              <div className="flex items-center gap-2 mb-4">
+                <Users className="w-5 h-5 text-gray-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Top Employees by Orders</h3>
+              </div>
+              {ownerStats.length === 0 ? (
+                <p className="text-sm text-gray-500">No owner data available yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {ownerStats.map((owner) => (
+                    <div key={owner.owner_name} className="border border-gray-200 rounded-lg p-4">
+                      <p className="text-sm text-gray-500">Owner</p>
+                      <p className="text-lg font-semibold text-gray-900">{owner.owner_name || 'Unassigned'}</p>
+                      <p className="text-sm text-gray-500">{owner.total_orders} orders</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Orders Table */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
+                </div>
+              ) : orders.length === 0 ? (
+                <div className="p-12 text-center">
+                  <p className="text-gray-500 mb-2">No reference orders found.</p>
+                  <p className="text-sm text-gray-400">
+                    Try adjusting your filters or import the completed-orders sheet to populate this view.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Select</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Creator</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Owner</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Date Paid</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Price / Video</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Approved</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Paid</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Account</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Avg Views</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orders.map((order) => {
+                          const normalized = normalizeHandle(order.normalized_username || order.username);
+                          const isSelected = normalized ? Boolean(selectedCreators[normalized]) : false;
+                          return (
+                            <tr key={order.id} className="border-b border-gray-100 last:border-b-0">
+                              <td className="px-4 py-4 text-sm">
+                                {normalized ? (
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 text-primary-600 border-gray-300 rounded"
+                                    checked={isSelected}
+                                    onChange={() => handleToggleCreatorSelection(order)}
+                                  />
+                                ) : (
+                                  <span className="text-xs text-gray-400">N/A</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4">
+                                <p className="text-sm font-semibold text-gray-900">@{order.username}</p>
+                                <p className="text-xs text-gray-500">{order.email || 'No email'}</p>
+                                {order.influencer_id ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 mt-1 bg-green-100 text-green-700 text-xs rounded-full">
+                                    Matched
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 mt-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                    Not in DB
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-gray-700">{order.owner_name || 'Unassigned'}</td>
+                              <td className="px-6 py-4 text-sm text-gray-700">
+                                <div className="flex items-center gap-2">
+                                  <CalendarDays className="w-4 h-4 text-blue-500" />
+                                  <span>{formatDateValue(order.date_paid)}</span>
+                                </div>
+                                {order.video_count ? (
+                                  <p className="text-xs text-gray-500">{order.video_count} videos</p>
+                                ) : null}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-gray-700">
+                                <div className="flex items-center gap-2">
+                                  <DollarSign className="w-4 h-4 text-green-500" />
+                                  <span>{formatCurrencyValue(order.price_per_video)}</span>
+                                </div>
+                                {order.final_price ? (
+                                  <p className="text-xs text-gray-500">Total: {formatCurrencyValue(order.final_price)}</p>
+                                ) : null}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                <span
+                                  className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${order.approved_vendor
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-gray-100 text-gray-600'
+                                    }`}
+                                >
+                                  {order.approved_vendor ? 'Yes' : 'No'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                <span
+                                  className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${order.paid ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
+                                    }`}
+                                >
+                                  {order.paid ? 'Paid' : 'Pending'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {order.account_link ? (
+                                  <a
+                                    href={order.account_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    View
+                                  </a>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {order.avg_views ? (
+                                  <div>
+                                    <p className="text-sm font-semibold text-gray-900">
+                                      {numberFormatter.format(order.avg_views)}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      Updated {formatDateValue(order.avg_views_updated_at)}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-gray-500">
+                                    {order.avg_views_status === 'no_data' ? 'No data yet' : 'Not calculated'}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                  <button
+                                    onClick={() => openEditModal(order)}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-50"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteOrder(order.id)}
+                                    disabled={deletingOrderId === order.id}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    {deletingOrderId === order.id ? (
+                                      <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Deleting...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination */}
+                  <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                    <p className="text-sm text-gray-600">
+                      Showing {(currentPage - 1) * limit + 1} – {Math.min(currentPage * limit, (currentPage - 1) * limit + orders.length)} of{' '}
+                      {numberFormatter.format(totalRecords)} orders
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Prev
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Song Analytics Tab */}
+        {activeTab === 'songs' && (
+          <div>
+            {/* Refresh Button */}
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={handleRefreshSongAnalytics}
+                disabled={refreshingSongs}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {refreshingSongs ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Refreshing Cache...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh Analytics
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Song Summary Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Total Songs</p>
+                <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(songTotals.total_songs)}</p>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Total Videos</p>
+                <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(songTotals.total_videos)}</p>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Total Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{numberFormatter.format(songTotals.total_orders)}</p>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <p className="text-sm text-gray-500 mb-1">Total Spend</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {formatCurrencyValue(
+                    songAnalytics.reduce((sum, song) => sum + (song.total_spend || 0), 0)
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {loadingSongs ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
+              </div>
+            ) : songAnalytics.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm p-12 text-center border border-gray-200">
+                <Music className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-500 mb-2">No song data available</p>
+                <p className="text-sm text-gray-400">Import reference orders with song information to see analytics</p>
+              </div>
+            ) : (
+              <>
+                {/* Visualizations */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="w-full md:max-w-md">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Search Song Name</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={songSearch}
+                          onChange={(e) => {
+                            setSongPage(1);
+                            setSongSearch(e.target.value);
+                          }}
+                          placeholder="Type to filter by song name"
+                          className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 mt-2 md:mt-6">
+                      <button
+                        onClick={() => setSongSearch('')}
+                        disabled={!songSearch}
+                        className="text-sm text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed"
+                      >
+                        Clear search
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                  {/* Orders by Song */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <Users className="w-5 h-5 text-green-600" />
+                      Orders by Song (Top 10)
+                    </h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={filteredSongs.slice(0, 10)}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="song_name" angle={-45} textAnchor="end" height={120} />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="order_count" fill="#10b981" name="Orders" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Videos by Song */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <BarChart3 className="w-5 h-5 text-blue-600" />
+                      Videos by Song (Top 10)
+                    </h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={filteredSongs.slice(0, 10)}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="song_name" angle={-45} textAnchor="end" height={120} />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="total_videos" fill="#3b82f6" name="Total Videos" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Song Breakdown Table */}
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-6">
+                  <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Music className="w-5 h-5" />
+                      <h2 className="text-lg font-semibold text-gray-900">Song Breakdown</h2>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Showing {(songPage - 1) * SONGS_PER_PAGE + 1}-
+                      {Math.min(songPage * SONGS_PER_PAGE, filteredSongs.length)} of{' '}
+                      {numberFormatter.format(filteredSongs.length)}
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Song Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Total Videos</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Number of Orders</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Avg Price/Video</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Total Spend</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedSongs.map((song, idx) => (
+                          <tr key={`${song.song_name}-${idx}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="px-6 py-4 text-sm font-medium text-gray-900">{song.song_name}</td>
+                            <td className="px-6 py-4 text-sm text-gray-600">{numberFormatter.format(song.total_videos)}</td>
+                            <td className="px-6 py-4 text-sm text-gray-600">{song.order_count}</td>
+                            <td className="px-6 py-4 text-sm text-gray-600">{formatCurrencyValue(song.avg_price_per_video)}</td>
+                            <td className="px-6 py-4 text-sm font-semibold text-gray-900">{formatCurrencyValue(song.total_spend)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-white">
+                    <button
+                      onClick={() => setSongPage((prev) => Math.max(1, prev - 1))}
+                      disabled={songPage === 1}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Prev
+                    </button>
+                    <span className="text-sm text-gray-600">
+                      Page {songPage} of {songPageCount}
+                    </span>
+                    <button
+                      onClick={() => setSongPage((prev) => Math.min(songPageCount, prev + 1))}
+                      disabled={songPage === songPageCount}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {manualModalOpen && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900">Add Creator Order</h2>
-              <p className="text-sm text-gray-500">Log a new collaboration manually to keep totals up to date.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Add Creator Order</h2>
+                <p className="text-sm text-gray-500">Log a new collaboration manually to keep totals up to date.</p>
+              </div>
+              <button onClick={closeManualModal} className="text-gray-500 hover:text-gray-700" aria-label="Close modal">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <button onClick={closeManualModal} className="text-gray-500 hover:text-gray-700" aria-label="Close modal">
-              <X className="w-5 h-5" />
-            </button>
+            <form onSubmit={handleManualOrderSubmit} className="px-6 py-6 space-y-6">
+              {manualError && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{manualError}</div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Creator Handle *</label>
+                  <input
+                    type="text"
+                    value={manualOrder.username}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, username: e.target.value }))}
+                    placeholder="@creator"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Owner / Employee *</label>
+                  <input
+                    type="text"
+                    value={manualOrder.ownerName}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, ownerName: e.target.value }))}
+                    placeholder="Ryan"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={manualOrder.email}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, email: e.target.value }))}
+                    placeholder="creator@email.com"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Account Link</label>
+                  <input
+                    type="url"
+                    value={manualOrder.accountLink}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, accountLink: e.target.value }))}
+                    placeholder="https://www.tiktok.com/@creator"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Price per Video (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualOrder.pricePerVideo}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, pricePerVideo: e.target.value }))}
+                    placeholder="750"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Quoted Price (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualOrder.priceUsd}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, priceUsd: e.target.value }))}
+                    placeholder="1000"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Total Fee / Import</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualOrder.totalFeePerImport}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, totalFeePerImport: e.target.value }))}
+                    placeholder="1500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Final Price Paid</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualOrder.finalPrice}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, finalPrice: e.target.value }))}
+                    placeholder="1500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"># of Videos</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={manualOrder.videoCount}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, videoCount: e.target.value }))}
+                    placeholder="2"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Song / Notes</label>
+                  <input
+                    type="text"
+                    value={manualOrder.songs}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, songs: e.target.value }))}
+                    placeholder="Artist - Song"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date Paid</label>
+                  <input
+                    type="date"
+                    value={manualOrder.datePaid}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, datePaid: e.target.value }))}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    checked={manualOrder.approvedVendor}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, approvedVendor: e.target.checked }))}
+                  />
+                  <span className="text-sm text-gray-700">Approved vendor</span>
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    checked={manualOrder.paid}
+                    onChange={(e) => setManualOrder((prev) => ({ ...prev, paid: e.target.checked }))}
+                  />
+                  <span className="text-sm text-gray-700">Payment received</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeManualModal}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                  disabled={manualSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={manualSaving}
+                  className="inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {manualSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  {manualSaving ? 'Saving...' : 'Save order'}
+                </button>
+              </div>
+            </form>
           </div>
-          <form onSubmit={handleManualOrderSubmit} className="px-6 py-6 space-y-6">
-            {manualError && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{manualError}</div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Creator Handle *</label>
-                <input
-                  type="text"
-                  value={manualOrder.username}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, username: e.target.value }))}
-                  placeholder="@creator"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Owner / Employee *</label>
-                <input
-                  type="text"
-                  value={manualOrder.ownerName}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, ownerName: e.target.value }))}
-                  placeholder="Ryan"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  value={manualOrder.email}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, email: e.target.value }))}
-                  placeholder="creator@email.com"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Account Link</label>
-                <input
-                  type="url"
-                  value={manualOrder.accountLink}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, accountLink: e.target.value }))}
-                  placeholder="https://www.tiktok.com/@creator"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Price per Video (USD)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={manualOrder.pricePerVideo}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, pricePerVideo: e.target.value }))}
-                  placeholder="750"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Quoted Price (USD)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={manualOrder.priceUsd}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, priceUsd: e.target.value }))}
-                  placeholder="1000"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Total Fee / Import</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={manualOrder.totalFeePerImport}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, totalFeePerImport: e.target.value }))}
-                  placeholder="1500"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Final Price Paid</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={manualOrder.finalPrice}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, finalPrice: e.target.value }))}
-                  placeholder="1500"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1"># of Videos</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={manualOrder.videoCount}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, videoCount: e.target.value }))}
-                  placeholder="2"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Song / Notes</label>
-                <input
-                  type="text"
-                  value={manualOrder.songs}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, songs: e.target.value }))}
-                  placeholder="Artist - Song"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date Paid</label>
-                <input
-                  type="date"
-                  value={manualOrder.datePaid}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, datePaid: e.target.value }))}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  checked={manualOrder.approvedVendor}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, approvedVendor: e.target.checked }))}
-                />
-                <span className="text-sm text-gray-700">Approved vendor</span>
-              </label>
-              <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  checked={manualOrder.paid}
-                  onChange={(e) => setManualOrder((prev) => ({ ...prev, paid: e.target.checked }))}
-                />
-                <span className="text-sm text-gray-700">Payment received</span>
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={closeManualModal}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
-                disabled={manualSaving}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={manualSaving}
-                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                {manualSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                {manualSaving ? 'Saving...' : 'Save order'}
-              </button>
-            </div>
-          </form>
         </div>
-      </div>
       )}
       {editModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
