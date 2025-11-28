@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface ScraperRun {
   id: string;
   campaign_id?: string;
@@ -60,17 +62,17 @@ export default function ScrapersPage() {
   // Check if any scraper is currently running
   const checkRunningScrapers = useCallback(async (): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/scrapers/runs?limit=50');
+      const response = await fetch(`${API_URL}/api/v1/scrapers/runs?limit=50`);
       if (response.ok) {
         const data = await response.json();
         const runs = data.runs || [];
-        
+
         // Check if any scrapers are running or pending
-        const runningRun = runs.find((run: ScraperRun) => 
+        const runningRun = runs.find((run: ScraperRun) =>
           run.status === 'running' || run.status === 'pending'
         );
         const hasRunning = Boolean(runningRun);
-        
+
         // Also update the runs list for history tab
         setScraperRuns(runs);
         setHasRunningScrapers(hasRunning);
@@ -78,7 +80,7 @@ export default function ScrapersPage() {
         persistActiveRun(runningRun || null);
         setLastChecked(new Date().toISOString());
         setStatusLoaded(true);
-        
+
         return hasRunning;
       }
       setActiveRun(null);
@@ -99,7 +101,7 @@ export default function ScrapersPage() {
   // Load scraper runs for history tab
   const loadScraperRuns = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/scrapers/runs?limit=50');
+      const response = await fetch(`${API_URL}/api/v1/scrapers/runs?limit=50`);
       if (response.ok) {
         const data = await response.json();
         const runs = data.runs || [];
@@ -131,23 +133,23 @@ export default function ScrapersPage() {
 
   const startHashtagScraper = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!selectedCampaign) {
       setMessage({ type: 'error', text: 'Please select a campaign before starting the scraper.' });
       return;
     }
-    
+
     setLoading(true);
     setMessage(null);
 
     try {
       // First, check if any scraper is already running
       const isRunning = await checkRunningScrapers();
-      
+
       if (isRunning) {
-        setMessage({ 
-          type: 'error', 
-          text: 'Another scraper is already in progress. Please wait for it to complete before starting a new one.' 
+        setMessage({
+          type: 'error',
+          text: 'Another scraper is already in progress. Please wait for it to complete before starting a new one.'
         });
         setLoading(false);
         return;
@@ -155,8 +157,8 @@ export default function ScrapersPage() {
 
       // If no scraper is running, proceed to start
       const hashtagList = hashtags.split(',').map(h => h.trim()).filter(h => h);
-      
-      const response = await fetch('http://localhost:8000/api/v1/scrapers/hashtag/start', {
+
+      const response = await fetch(`${API_URL}/api/v1/scrapers/hashtag/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -181,9 +183,9 @@ export default function ScrapersPage() {
           completed_at: undefined,
           error_message: undefined,
         };
-        setMessage({ 
-          type: 'success', 
-          text: `Hashtag scraper started! It will run in the background. Check the History tab for progress.` 
+        setMessage({
+          type: 'success',
+          text: `Hashtag scraper started! It will run in the background. Check the History tab for progress.`
         });
         setHashtags('');
         setHasRunningScrapers(true);
@@ -204,23 +206,23 @@ export default function ScrapersPage() {
 
   const startSoundScraper = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!selectedCampaign) {
       setMessage({ type: 'error', text: 'Please select a campaign before starting the scraper.' });
       return;
     }
-    
+
     setLoading(true);
     setMessage(null);
 
     try {
       // First, check if any scraper is already running
       const isRunning = await checkRunningScrapers();
-      
+
       if (isRunning) {
-        setMessage({ 
-          type: 'error', 
-          text: 'Another scraper is already in progress. Please wait for it to complete before starting a new one.' 
+        setMessage({
+          type: 'error',
+          text: 'Another scraper is already in progress. Please wait for it to complete before starting a new one.'
         });
         setLoading(false);
         return;
@@ -228,8 +230,8 @@ export default function ScrapersPage() {
 
       // If no scraper is running, proceed to start
       const urlList = soundUrls.split('\n').map(u => u.trim()).filter(u => u);
-      
-      const response = await fetch('http://localhost:8000/api/v1/scrapers/sound/start', {
+
+      const response = await fetch(`${API_URL}/api/v1/scrapers/sound/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -254,9 +256,9 @@ export default function ScrapersPage() {
           completed_at: undefined,
           error_message: undefined,
         };
-        setMessage({ 
-          type: 'success', 
-          text: `Sound scraper started! It will run in the background. Check the History tab for progress.` 
+        setMessage({
+          type: 'success',
+          text: `Sound scraper started! It will run in the background. Check the History tab for progress.`
         });
         setSoundUrls('');
         setHasRunningScrapers(true);
@@ -282,7 +284,7 @@ export default function ScrapersPage() {
       completed: 'bg-green-100 text-green-800',
       failed: 'bg-red-100 text-red-800'
     };
-    
+
     return (
       <span className={`px-3 py-1 rounded-full text-xs font-semibold ${styles[status as keyof typeof styles] || 'bg-gray-100 text-gray-800'}`}>
         {status.toUpperCase()}
@@ -341,7 +343,7 @@ export default function ScrapersPage() {
             <h1 className="text-3xl font-bold text-gray-900">TikTok Scrapers</h1>
             <p className="text-gray-600 mt-2">Discover influencers using hashtags or sound IDs</p>
           </div>
-          <Link 
+          <Link
             href="/dashboard/influencers"
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
           >
@@ -349,13 +351,12 @@ export default function ScrapersPage() {
           </Link>
         </div>
 
-        
+
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
-            message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 
-            message.type === 'info' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
-            'bg-red-50 text-red-800 border border-red-200'
-          }`}>
+          <div className={`mb-6 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' :
+              message.type === 'info' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+                'bg-red-50 text-red-800 border border-red-200'
+            }`}>
             {message.text}
           </div>
         )}
@@ -402,21 +403,19 @@ export default function ScrapersPage() {
             <div className="flex space-x-8 px-6">
               <button
                 onClick={() => setActiveTab('hashtag')}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'hashtag'
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'hashtag'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                  }`}
               >
                 🔍 Hashtag Scraper
               </button>
               <button
                 onClick={() => setActiveTab('sound')}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'sound'
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'sound'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                  }`}
               >
                 🎵 Sound Scraper
               </button>
@@ -425,11 +424,10 @@ export default function ScrapersPage() {
                   setActiveTab('runs');
                   await loadScraperRuns();
                 }}
-                className={`py-4 px-4 font-medium border-b-2 transition-colors ${
-                  activeTab === 'runs'
+                className={`py-4 px-4 font-medium border-b-2 transition-colors ${activeTab === 'runs'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                  }`}
               >
                 History
               </button>
