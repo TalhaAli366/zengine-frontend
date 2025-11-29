@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video } from 'lucide-react';
+import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video, StopCircle } from 'lucide-react';
 import { importReferenceOrders, ReferenceImportResult } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -100,6 +100,7 @@ const formatDateForInput = (value?: string | null) => {
 };
 
 const SONGS_PER_PAGE = 20;
+const JOBS_PER_PAGE = 3;
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const normalizeHandle = (value?: string | null) => {
@@ -164,7 +165,12 @@ export default function ReferenceOrdersPage() {
   const [avgViewJobs, setAvgViewJobs] = useState<AvgViewJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true); // Start as true to disable buttons during initial load
   const [avgViewProcessing, setAvgViewProcessing] = useState(false);
-  const recentAvgViewJobs = useMemo(() => avgViewJobs.slice(0, 5), [avgViewJobs]);
+  const [jobsPage, setJobsPage] = useState(1);
+  const jobsPageCount = Math.max(1, Math.ceil(avgViewJobs.length / JOBS_PER_PAGE) || 1);
+  const paginatedJobs = useMemo(() => {
+    const start = (jobsPage - 1) * JOBS_PER_PAGE;
+    return avgViewJobs.slice(start, start + JOBS_PER_PAGE);
+  }, [avgViewJobs, jobsPage]);
 
   const [sheetUrl, setSheetUrl] = useState('');
   const [syncingSheet, setSyncingSheet] = useState(false);
@@ -237,6 +243,41 @@ export default function ReferenceOrdersPage() {
   const hasRunningJob = useMemo(() => {
     return avgViewJobs.some((job) => job.status === 'pending' || job.status === 'running');
   }, [avgViewJobs]);
+
+  // Get the running job for force stop button
+  const runningJob = useMemo(() => {
+    return avgViewJobs.find((job) => job.status === 'pending' || job.status === 'running');
+  }, [avgViewJobs]);
+
+  const [isForceStopping, setIsForceStopping] = useState(false);
+
+  // Force stop a running avg view job
+  const forceStopJob = async (jobId: string) => {
+    if (!confirm('Are you sure you want to force stop this job? This will mark it as stopped and allow you to start a new job.')) {
+      return;
+    }
+    
+    setIsForceStopping(true);
+    try {
+      const response = await fetch(`${API_URL}/api/v1/reference-orders/avg-views/jobs/${jobId}/force-stop`, {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to stop job');
+      }
+      
+      setBanner({ type: 'success', message: 'Avg view job stopped successfully. You can now start a new job.' });
+      
+      // Refresh the jobs list
+      await loadAvgViewJobs();
+    } catch (err: any) {
+      setBanner({ type: 'error', message: err.message || 'Failed to stop job' });
+    } finally {
+      setIsForceStopping(false);
+    }
+  };
 
   const loadOrders = async () => {
     try {
@@ -967,13 +1008,24 @@ export default function ReferenceOrdersPage() {
                 <span className="font-semibold text-gray-900">{numberFormatter.format(selectedCreatorCount)}</span>. Previously
                 processed creators are skipped automatically.
               </p>
-              {hasRunningJob && (
-                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start gap-2">
-                  <Loader2 className="w-4 h-4 text-yellow-600 mt-0.5 animate-spin flex-shrink-0" />
-                  <p className="text-sm text-yellow-800">
-                    <span className="font-semibold">Job in progress:</span> Another avg view calculation job is currently running.
-                    Please wait for it to complete before starting a new one.
-                  </p>
+              {hasRunningJob && runningJob && (
+                <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2">
+                    <Loader2 className="w-4 h-4 text-yellow-600 mt-0.5 animate-spin flex-shrink-0" />
+                    <p className="text-sm text-yellow-800">
+                      <span className="font-semibold">Job in progress:</span> Another avg view calculation job is currently running.
+                      Please wait for it to complete before starting a new one.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => forceStopJob(runningJob.id)}
+                    disabled={isForceStopping}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 flex-shrink-0"
+                    title="Force stop this job if it's stuck or you want to cancel it"
+                  >
+                    <StopCircle className="w-4 h-4" />
+                    {isForceStopping ? 'Stopping...' : 'Force Stop'}
+                  </button>
                 </div>
               )}
             </div>
@@ -997,9 +1049,10 @@ export default function ReferenceOrdersPage() {
                 <div className="flex items-center justify-center py-6">
                   <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
                 </div>
-              ) : recentAvgViewJobs.length === 0 ? (
+              ) : avgViewJobs.length === 0 ? (
                 <p className="text-sm text-gray-500">No avg view jobs have been queued yet.</p>
               ) : (
+                <>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1013,7 +1066,7 @@ export default function ReferenceOrdersPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {recentAvgViewJobs.map((job) => (
+                      {paginatedJobs.map((job) => (
                         <tr key={job.id} className="border-b border-gray-100 last:border-0">
                           <td className="px-4 py-3 text-gray-700 capitalize">{job.mode || 'manual'}</td>
                           <td className="px-4 py-3 text-gray-900 font-medium">
@@ -1046,6 +1099,31 @@ export default function ReferenceOrdersPage() {
                     </tbody>
                   </table>
                 </div>
+                {/* Jobs Pagination */}
+                {jobsPageCount > 1 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
+                    <span className="text-sm text-gray-600">
+                      Page {jobsPage} of {jobsPageCount} ({avgViewJobs.length} jobs)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setJobsPage((p) => Math.max(1, p - 1))}
+                        disabled={jobsPage <= 1}
+                        className="px-3 py-1 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        onClick={() => setJobsPage((p) => Math.min(jobsPageCount, p + 1))}
+                        disabled={jobsPage >= jobsPageCount}
+                        className="px-3 py-1 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+                </>
               )}
             </div>
 
