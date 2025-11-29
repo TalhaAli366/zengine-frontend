@@ -356,6 +356,12 @@ export async function PATCH(request: NextRequest) {
       return Number.isNaN(numeric) ? null : numeric;
     };
 
+    const normalizeInteger = (value: any) => {
+      if (value === null || value === undefined || value === '') return null;
+      const numeric = Number(value);
+      return Number.isNaN(numeric) ? null : Math.floor(numeric);
+    };
+
     const normalizeDate = (value: any) => {
       const parsed = normalizeString(value);
       if (!parsed) return null;
@@ -383,7 +389,7 @@ export async function PATCH(request: NextRequest) {
     }
     const avgViews = body.avg_views ?? body.avgViews;
     if (avgViews !== undefined) {
-      payload.avg_views = normalizeNumber(avgViews);
+      payload.avg_views = normalizeInteger(avgViews);
     }
     const engagementRate = body.engagement_rate ?? body.engagementRate;
     if (engagementRate !== undefined) {
