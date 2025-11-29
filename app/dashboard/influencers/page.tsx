@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Users, Search, Filter, X, Trash2, ChevronLeft, ChevronRight, MapPin, BarChart3, TrendingUp, CalendarDays, DollarSign, Edit2 } from 'lucide-react';
 import { detectRegion } from '@/lib/api';
@@ -70,6 +70,7 @@ export default function InfluencersPage() {
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState('');
   const [minFollowers, setMinFollowers] = useState('');
   const [maxFollowers, setMaxFollowers] = useState('');
@@ -133,11 +134,26 @@ export default function InfluencersPage() {
     return parsed.toLocaleDateString();
   };
 
+  // Debounce search query to avoid excessive API calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset to page 1 when search changes
+  useEffect(() => {
+    if (debouncedSearch !== '') {
+      setCurrentPage(1);
+    }
+  }, [debouncedSearch]);
+
   useEffect(() => {
     loadCampaigns();
     loadFilters();
     loadInfluencers();
-  }, [currentPage, selectedCampaign, minFollowers, maxFollowers, minEngagementRate, maxEngagementRate, minAvgViews, maxAvgViews, selectedHashtag, selectedSound, reachedOutFilter, onlyWithEmail]); // Reload when page or filters change
+  }, [currentPage, selectedCampaign, debouncedSearch, minFollowers, maxFollowers, minEngagementRate, maxEngagementRate, minAvgViews, maxAvgViews, selectedHashtag, selectedSound, reachedOutFilter, onlyWithEmail]); // Reload when page or filters change
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -193,19 +209,10 @@ export default function InfluencersPage() {
     }
   }, [loadingInfluencers, allInfluencers]);
 
+  // Sync influencers state when allInfluencers changes (from API response)
   useEffect(() => {
-    // Client-side search filter (instant feedback)
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const filtered = allInfluencers.filter(inf =>
-        inf.username?.toLowerCase().includes(query) ||
-        inf.display_name?.toLowerCase().includes(query)
-      );
-      setInfluencers(filtered);
-    } else {
-      setInfluencers(allInfluencers);
-    }
-  }, [searchQuery, allInfluencers]);
+    setInfluencers(allInfluencers);
+  }, [allInfluencers]);
 
   const loadCampaigns = async () => {
     try {
@@ -243,7 +250,7 @@ export default function InfluencersPage() {
 
       // Filters
       if (selectedCampaign) params.append('campaign', selectedCampaign);
-      if (searchQuery) params.append('search', searchQuery);
+      if (debouncedSearch) params.append('search', debouncedSearch);
       if (minFollowers) params.append('min_followers', minFollowers);
       if (maxFollowers) params.append('max_followers', maxFollowers);
       if (minEngagementRate) params.append('min_engagement_rate', minEngagementRate);
