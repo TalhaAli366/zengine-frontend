@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Music, Settings, RefreshCw, Hash } from 'lucide-react';
+import { Search, Music, Settings, RefreshCw, Hash, StopCircle } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -42,9 +42,12 @@ export default function ScrapersPage() {
   const [activeRun, setActiveRun] = useState<ScraperRun | null>(null);
   const [lastChecked, setLastChecked] = useState<string | null>(null);
   const [statusLoaded, setStatusLoaded] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(true); // Start as true to disable buttons during initial check
+  const [isForceStopping, setIsForceStopping] = useState(false);
   const storageKey = 'activeScraperRun';
   const isRunningScraper = hasRunningScrapers || Boolean(activeRun);
-  const statusResolved = statusLoaded || Boolean(activeRun);
+  // Only mark as resolved if we've loaded the status OR if we're not currently checking
+  const statusResolved = statusLoaded && !isCheckingStatus;
 
   const loadCampaigns = async () => {
     try {
@@ -57,6 +60,37 @@ export default function ScrapersPage() {
       }
     } catch (error) {
       console.error('Failed to load campaigns:', error);
+    }
+  };
+
+  // Force stop a running scraper
+  const forceStopRun = async (runId: string) => {
+    if (!confirm('Are you sure you want to force stop this scraper run? This will mark it as stopped and allow you to start a new run.')) {
+      return;
+    }
+    
+    setIsForceStopping(true);
+    try {
+      const response = await fetch(`${API_URL}/api/v1/scrapers/runs/${runId}/force-stop`, {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to stop scraper run');
+      }
+      
+      setMessage({ type: 'success', text: 'Scraper run stopped successfully. You can now start a new run.' });
+      setActiveRun(null);
+      setHasRunningScrapers(false);
+      persistActiveRun(null);
+      
+      // Refresh the runs list
+      await checkRunningScrapers();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error.message || 'Failed to stop scraper run' });
+    } finally {
+      setIsForceStopping(false);
     }
   };
 
@@ -81,6 +115,7 @@ export default function ScrapersPage() {
         persistActiveRun(runningRun || null);
         setLastChecked(new Date().toISOString());
         setStatusLoaded(true);
+        setIsCheckingStatus(false); // Mark checking as complete
 
         return hasRunning;
       }
@@ -88,6 +123,7 @@ export default function ScrapersPage() {
       setHasRunningScrapers(false);
       persistActiveRun(null);
       setStatusLoaded(true);
+      setIsCheckingStatus(false); // Mark checking as complete
       return false;
     } catch (error) {
       console.error('Failed to check running scrapers:', error);
@@ -95,6 +131,7 @@ export default function ScrapersPage() {
       setHasRunningScrapers(false);
       persistActiveRun(null);
       setStatusLoaded(true);
+      setIsCheckingStatus(false); // Mark checking as complete
       return false;
     }
   }, []);
@@ -391,6 +428,14 @@ export default function ScrapersPage() {
                 className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
               >
                 <RefreshCw className="w-4 h-4" /> Refresh status
+              </button>
+              <button
+                onClick={() => forceStopRun(activeRun.id)}
+                disabled={isForceStopping}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+                title="Force stop this run if it's stuck or you want to cancel it"
+              >
+                <StopCircle className="w-4 h-4" /> {isForceStopping ? 'Stopping...' : 'Force Stop'}
               </button>
               <p className="text-xs text-blue-800">
                 You can navigate away — this run continues in the background.
