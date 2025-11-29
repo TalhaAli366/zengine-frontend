@@ -496,7 +496,7 @@ export default function InfluencersPage() {
       email: influencer.email || '',
       country: influencer.country || '',
       followers: influencer.followers?.toString() || '',
-      avgViews: influencer.avg_views?.toString() || '',
+      avgViews: influencer.avg_views != null ? Math.floor(influencer.avg_views).toString() : '',
       engagementRate: influencer.engagement_rate?.toString() || '',
       hasOutreach: Boolean(influencer.has_outreach),
       lastOutreachAt: influencer.last_outreach_at ? influencer.last_outreach_at.substring(0, 10) : '',
