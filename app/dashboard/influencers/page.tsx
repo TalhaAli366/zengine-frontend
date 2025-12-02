@@ -1133,9 +1133,9 @@ export default function InfluencersPage() {
             </div>
           ) : influencers.length > 0 ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="overflow-x-auto overflow-y-visible">
+              <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: '70vh' }}>
                 <table className="w-full" style={{ minWidth: '1200px' }}>
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
                         <input

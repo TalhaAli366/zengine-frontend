@@ -113,8 +113,62 @@ export async function GET(request: NextRequest) {
     // For avg_views, owner_name, and price_per_video sorting, we need to fetch all, sort, then paginate
     // (owner_name needs case-insensitive sorting, price_per_video needs to sort across all pages)
     if (sortBy === 'avg_views' || sortBy === 'owner_name' || sortBy === 'price_per_video') {
+      // Build a fresh query without the default order for custom sorting
+      let customSortQuery = supabase
+        .from('reference_orders')
+        .select(`
+          id,
+          influencer_id,
+          username,
+          normalized_username,
+          email,
+          account_link,
+          owner_name,
+          approved_vendor,
+          total_fee_per_import,
+          price_usd,
+          video_count,
+          final_price,
+          price_per_video,
+          songs,
+          paid,
+          date_paid,
+          video_links,
+          created_at
+        `, { count: 'exact' });
+      
+      // Reapply all filters to the custom sort query
+      if (search) {
+        const encoded = `%${search}%`;
+        customSortQuery = customSortQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+      }
+      if (owner) {
+        customSortQuery = customSortQuery.ilike('owner_name', `%${owner}%`);
+      }
+      if (approved === 'yes') {
+        customSortQuery = customSortQuery.eq('approved_vendor', true);
+      } else if (approved === 'no') {
+        customSortQuery = customSortQuery.eq('approved_vendor', false);
+      }
+      if (paid === 'paid') {
+        customSortQuery = customSortQuery.eq('paid', true);
+      } else if (paid === 'unpaid') {
+        customSortQuery = customSortQuery.eq('paid', false);
+      }
+      if (matched === 'true') {
+        customSortQuery = customSortQuery.not('influencer_id', 'is', null);
+      } else if (matched === 'false') {
+        customSortQuery = customSortQuery.is('influencer_id', null);
+      }
+      if (dateFrom) {
+        customSortQuery = customSortQuery.gte('date_paid', dateFrom);
+      }
+      if (dateTo) {
+        customSortQuery = customSortQuery.lte('date_paid', dateTo);
+      }
+      
       // Fetch ALL matching records (without pagination) to sort them properly
-      const { data: allData, error: allError, count: totalCount } = await query;
+      const { data: allData, error: allError, count: totalCount } = await customSortQuery;
       if (allError) throw allError;
 
       count = totalCount || 0;
@@ -176,10 +230,10 @@ export async function GET(request: NextRequest) {
           return 0;
         });
       } else if (sortBy === 'price_per_video') {
-        // Numeric sorting for price_per_video
+        // Numeric sorting for price_per_video - same pattern as avg_views
         enrichedAll.sort((a, b) => {
-          const aVal = a.price_per_video ?? (ascending ? Infinity : -Infinity);
-          const bVal = b.price_per_video ?? (ascending ? Infinity : -Infinity);
+          const aVal = a.price_per_video ?? -1;
+          const bVal = b.price_per_video ?? -1;
           return ascending ? aVal - bVal : bVal - aVal;
         });
       }
