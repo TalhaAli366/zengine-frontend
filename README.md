@@ -1,7 +1,7 @@
 # TikTok Influencer Marketing Platform - Frontend
 
 A modern, professional authentication system and dashboard for the TikTok Influencer Marketing Automation Platform built with Next.js 14, TypeScript, Tailwind CSS, and Supabase.
-
+ 
 ## Features
 
 - ✅ **Modern Authentication System**
