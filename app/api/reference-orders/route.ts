@@ -3,6 +3,10 @@ import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { createHash } from 'crypto';
 
+// Disable caching for this route to ensure fresh data on every request
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const normalizeUsername = (value: string) => value.trim().toLowerCase().replace(/^@/, '');
 
 const parseNumber = (value: any) => {
@@ -45,6 +49,9 @@ export async function GET(request: NextRequest) {
     const uniqueCreators = searchParams.get('unique_creators') === 'true';
     const sortBy = searchParams.get('sort_by') || 'date_paid';
     const sortOrder = searchParams.get('sort_order') || 'desc';
+    
+    console.log(`[API REQUEST] URL: ${request.nextUrl.toString()}`);
+    console.log(`[API REQUEST] sort_by: ${sortBy}, sort_order: ${sortOrder}, uniqueCreators: ${uniqueCreators}`);
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25', 10)));
@@ -108,7 +115,7 @@ export async function GET(request: NextRequest) {
       query = query.lte('date_paid', dateTo);
     }
 
-    // Apply sorting - handle avg_views and owner_name separately
+    // Apply sorting - handle avg_views separately (requires join), others can use database sorting
     const validSortColumns = ['date_paid', 'owner_name', 'username', 'price_per_video', 'final_price'];
     const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'date_paid';
     const ascending = sortOrder === 'asc';
@@ -116,8 +123,249 @@ export async function GET(request: NextRequest) {
     let data: any[] = [];
     let count = 0;
 
+    // For price_per_video and owner_name, use simple database sorting (direct columns)
+    if ((sortBy === 'price_per_video' || sortBy === 'owner_name') && !uniqueCreators && !minAvgViews && !maxAvgViews) {
+      // Use efficient database sorting - only fetch what we need for current page
+      console.log(`[DATABASE SORT] Using database sorting for ${sortBy}, ascending: ${ascending}`);
+      
+      // Rebuild query without default order, then apply custom sort
+      let dbSortQuery = supabase
+        .from('reference_orders')
+        .select(`
+          id,
+          influencer_id,
+          username,
+          normalized_username,
+          email,
+          account_link,
+          owner_name,
+          approved_vendor,
+          total_fee_per_import,
+          price_usd,
+          video_count,
+          final_price,
+          price_per_video,
+          songs,
+          paid,
+          date_paid,
+          video_links,
+          created_at
+        `, { count: 'exact' });
+      
+      // Reapply all filters
+      if (search) {
+        const encoded = `%${search}%`;
+        dbSortQuery = dbSortQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+      }
+      if (owner) {
+        dbSortQuery = dbSortQuery.ilike('owner_name', `%${owner}%`);
+      }
+      if (approved === 'yes') {
+        dbSortQuery = dbSortQuery.eq('approved_vendor', true);
+      } else if (approved === 'no') {
+        dbSortQuery = dbSortQuery.eq('approved_vendor', false);
+      }
+      if (paid === 'paid') {
+        dbSortQuery = dbSortQuery.eq('paid', true);
+      } else if (paid === 'unpaid') {
+        dbSortQuery = dbSortQuery.eq('paid', false);
+      }
+      if (matched === 'true') {
+        dbSortQuery = dbSortQuery.not('influencer_id', 'is', null);
+      } else if (matched === 'false') {
+        dbSortQuery = dbSortQuery.is('influencer_id', null);
+      }
+      if (dateFrom) {
+        dbSortQuery = dbSortQuery.gte('date_paid', dateFrom);
+      }
+      if (dateTo) {
+        dbSortQuery = dbSortQuery.lte('date_paid', dateTo);
+      }
+      
+      // Apply custom sort
+      dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
+      
+      // Fetch only the records needed for current page
+      const { data: queryData, error: queryError, count: queryCount } = await dbSortQuery.range(offset, offset + limit - 1);
+      if (queryError) {
+        console.error(`[DATABASE SORT ERROR]`, queryError);
+        throw queryError;
+      }
+      
+      console.log(`[DATABASE SORT] Fetched ${queryData?.length || 0} records, total count: ${queryCount || 0}`);
+
+      data = queryData || [];
+      count = queryCount || 0;
+
+      // Enrich with avg_views for just this page
+      const normalizedUsernames = Array.from(
+        new Set((data || []).map((row) => row.normalized_username).filter(Boolean)),
+      );
+
+      if (normalizedUsernames.length) {
+        const { data: avgRows, error: avgError } = await supabase
+          .from('reference_creator_avg_views')
+          .select('normalized_username, avg_views, status, last_calculated_at')
+          .in('normalized_username', normalizedUsernames);
+
+        if (avgError) throw avgError;
+
+        const avgViewMap = (avgRows || []).reduce((acc, row) => {
+          const normalized = row.normalized_username;
+          if (!normalized) return acc;
+          acc[normalized] = {
+            avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+            status: row.status,
+            last_calculated_at: row.last_calculated_at,
+          };
+          return acc;
+        }, {} as Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }>);
+
+        data = data.map((row) => {
+          const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+          return {
+            ...row,
+            avg_views: avgViewEntry?.avg_views ?? null,
+            avg_views_status: avgViewEntry?.status ?? null,
+            avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+          };
+        });
+      } else {
+        data = data.map((row) => ({
+          ...row,
+          avg_views: null,
+          avg_views_status: null,
+          avg_views_updated_at: null,
+        }));
+      }
+    }
+    // For avg_views, we need to fetch more data and sort client-side (no FK relationship for join)
+    else if (sortBy === 'avg_views' && !uniqueCreators && !minAvgViews && !maxAvgViews) {
+      console.log(`[AVG_VIEWS SORT] Using client-side sorting for avg_views`);
+      
+      // Fetch a reasonable amount of data (up to 1000 records) to sort
+      const maxRecordsToFetch = 1000;
+      let dbSortQuery = supabase
+        .from('reference_orders')
+        .select(`
+          id,
+          influencer_id,
+          username,
+          normalized_username,
+          email,
+          account_link,
+          owner_name,
+          approved_vendor,
+          total_fee_per_import,
+          price_usd,
+          video_count,
+          final_price,
+          price_per_video,
+          songs,
+          paid,
+          date_paid,
+          video_links,
+          created_at
+        `, { count: 'exact' });
+      
+      // Reapply all filters
+      if (search) {
+        const encoded = `%${search}%`;
+        dbSortQuery = dbSortQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+      }
+      if (owner) {
+        dbSortQuery = dbSortQuery.ilike('owner_name', `%${owner}%`);
+      }
+      if (approved === 'yes') {
+        dbSortQuery = dbSortQuery.eq('approved_vendor', true);
+      } else if (approved === 'no') {
+        dbSortQuery = dbSortQuery.eq('approved_vendor', false);
+      }
+      if (paid === 'paid') {
+        dbSortQuery = dbSortQuery.eq('paid', true);
+      } else if (paid === 'unpaid') {
+        dbSortQuery = dbSortQuery.eq('paid', false);
+      }
+      if (matched === 'true') {
+        dbSortQuery = dbSortQuery.not('influencer_id', 'is', null);
+      } else if (matched === 'false') {
+        dbSortQuery = dbSortQuery.is('influencer_id', null);
+      }
+      if (dateFrom) {
+        dbSortQuery = dbSortQuery.gte('date_paid', dateFrom);
+      }
+      if (dateTo) {
+        dbSortQuery = dbSortQuery.lte('date_paid', dateTo);
+      }
+      
+      // Fetch records (up to maxRecordsToFetch) for sorting
+      const { data: allData, error: queryError, count: queryCount } = await dbSortQuery.range(0, maxRecordsToFetch - 1);
+      if (queryError) {
+        console.error(`[AVG_VIEWS SORT ERROR]`, queryError);
+        throw queryError;
+      }
+      
+      // Get all normalized usernames for avg_views enrichment
+      const normalizedUsernames = Array.from(
+        new Set((allData || []).map((row) => row.normalized_username).filter(Boolean)),
+      );
+
+      let avgViewMap: Record<
+        string,
+        { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }
+      > = {};
+
+      if (normalizedUsernames.length) {
+        const { data: avgRows, error: avgError } = await supabase
+          .from('reference_creator_avg_views')
+          .select('normalized_username, avg_views, status, last_calculated_at')
+          .in('normalized_username', normalizedUsernames);
+
+        if (avgError) throw avgError;
+        avgViewMap = (avgRows || []).reduce((acc, row) => {
+          const normalized = row.normalized_username;
+          if (!normalized) return acc;
+          acc[normalized] = {
+            avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+            status: row.status,
+            last_calculated_at: row.last_calculated_at,
+          };
+          return acc;
+        }, {} as typeof avgViewMap);
+      }
+      
+      // Enrich data with avg_views
+      let enrichedData = (allData || []).map((row: any) => {
+        const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+        return {
+          ...row,
+          avg_views: avgViewEntry?.avg_views ?? null,
+          avg_views_status: avgViewEntry?.status ?? null,
+          avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+        };
+      });
+      
+      // Sort by avg_views
+      enrichedData.sort((a: any, b: any) => {
+        const aAvgViews = a.avg_views;
+        const bAvgViews = b.avg_views;
+        if (aAvgViews === null && bAvgViews === null) return 0;
+        if (aAvgViews === null) return 1;
+        if (bAvgViews === null) return -1;
+        return ascending ? Number(aAvgViews) - Number(bAvgViews) : Number(bAvgViews) - Number(aAvgViews);
+      });
+      
+      // Update count
+      count = queryCount || enrichedData.length;
+      
+      // Apply pagination
+      const paginationOffset = (page - 1) * limit;
+      data = enrichedData.slice(paginationOffset, paginationOffset + limit);
+      
+      console.log(`[AVG_VIEWS SORT] Fetched ${enrichedData.length} records, sorted, returning page ${page} (${data.length} records)`);
+    }
     // If uniqueCreators is true, use the efficient database function
-    if (uniqueCreators) {
+    else if (uniqueCreators) {
       try {
         const { data: rpcData, error: rpcError } = await supabase.rpc('get_unique_reference_orders', {
           p_limit: limit,
@@ -239,7 +487,9 @@ export async function GET(request: NextRequest) {
         console.error('RPC error:', rpcErr);
         throw new Error(`Failed to fetch unique creators: ${rpcErr.message || 'Unknown error'}`);
       }
-    } else if (sortBy === 'avg_views' || sortBy === 'owner_name' || sortBy === 'price_per_video') {
+    } else if (sortBy === 'avg_views') {
+      // For avg_views, we need to join with reference_creator_avg_views, so we still need custom logic
+      console.log(`[ENTERING CUSTOM SORT BRANCH] sortBy: ${sortBy}, sortOrder: ${sortOrder}, ascending: ${ascending}`);
       // Build a fresh query without the default order for custom sorting
       let customSortQuery = supabase
         .from('reference_orders')
@@ -299,44 +549,122 @@ export async function GET(request: NextRequest) {
       }
       
       // Fetch ALL matching records (without pagination) to sort them properly
-      // Supabase has a default limit of 1000, so we need to fetch in batches or use a high limit
+      // Supabase has a default limit of 1000, so we need to fetch in batches
+      // Add ORDER BY to help Supabase optimize the query (even though we'll sort in memory)
+      // Use id for consistent ordering to avoid Supabase query issues
+      customSortQuery = customSortQuery.order('id', { ascending: true });
+      
       let allData: any[] = [];
       let totalCount = 0;
       
-      if (uniqueCreators) {
-        // When uniqueCreators is true, we need ALL data, so fetch in batches
-        const batchSize = 1000;
-        let offset = 0;
-        let hasMore = true;
-        let firstBatchCount = 0;
+      // Fetch total count first (this is faster than fetching all data)
+      // Build a separate query just for count (can't reuse customSortQuery since select() was already called)
+      try {
+        let countQuery = supabase
+          .from('reference_orders')
+          .select('*', { count: 'exact', head: true });
         
-        while (hasMore) {
-          const { data: batchData, error: batchError, count: batchCount } = await customSortQuery.range(offset, offset + batchSize - 1);
-          if (batchError) throw batchError;
+        // Apply same filters as customSortQuery
+        if (!uniqueCreators) {
+          if (search) {
+            const encoded = `%${search}%`;
+            countQuery = countQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+          }
+          if (owner) {
+            countQuery = countQuery.ilike('owner_name', `%${owner}%`);
+          }
+          if (approved === 'yes') {
+            countQuery = countQuery.eq('approved_vendor', true);
+          } else if (approved === 'no') {
+            countQuery = countQuery.eq('approved_vendor', false);
+          }
+          if (paid === 'paid') {
+            countQuery = countQuery.eq('paid', true);
+          } else if (paid === 'unpaid') {
+            countQuery = countQuery.eq('paid', false);
+          }
+          if (matched === 'true') {
+            countQuery = countQuery.not('influencer_id', 'is', null);
+          } else if (matched === 'false') {
+            countQuery = countQuery.is('influencer_id', null);
+          }
+          if (dateFrom) {
+            countQuery = countQuery.gte('date_paid', dateFrom);
+          }
+          if (dateTo) {
+            countQuery = countQuery.lte('date_paid', dateTo);
+          }
+        }
+        
+        const { count: totalCountResult, error: countError } = await countQuery;
+        if (countError) {
+          console.error(`[Count Error]`, countError);
+          // Continue anyway, we'll use the fetched data length
+        } else {
+          totalCount = totalCountResult || 0;
+          console.log(`[Total Count] ${totalCount} records to fetch`);
+        }
+      } catch (err: any) {
+        console.error(`[Count Exception]`, err);
+        // Continue anyway
+      }
+      
+      // Always fetch in batches to handle datasets larger than 1000 records
+      // Limit to reasonable number to avoid timeouts (e.g., 10k records max for sorting)
+      const maxRecordsToFetch = 10000;
+      const batchSize = 1000;
+      let batchOffset = 0;
+      let hasMore = true;
+      let firstBatchCount = 0;
+      
+      while (hasMore && allData.length < maxRecordsToFetch) {
+        try {
+          const { data: batchData, error: batchError, count: batchCount } = await customSortQuery.range(batchOffset, batchOffset + batchSize - 1);
           
-          // Get total count from first batch
-          if (offset === 0 && batchCount !== null) {
+          if (batchError) {
+            console.error(`[Batch Fetch Error] Offset: ${batchOffset}, Error:`, batchError);
+            // If we have some data, continue with what we have
+            if (allData.length > 0) {
+              console.log(`[Batch Fetch] Stopping due to error, but continuing with ${allData.length} records`);
+              break;
+            }
+            throw batchError;
+          }
+          
+          // Get total count from first batch if we didn't get it earlier
+          if (batchOffset === 0 && batchCount !== null && totalCount === 0) {
             firstBatchCount = batchCount;
+            totalCount = firstBatchCount;
+            console.log(`[Batch Fetch] Total count from first batch: ${firstBatchCount}`);
           }
           
           if (batchData && batchData.length > 0) {
             allData = allData.concat(batchData);
-            offset += batchSize;
-            hasMore = batchData.length === batchSize;
+            console.log(`[Batch Fetch] Fetched ${batchData.length} records, total so far: ${allData.length}`);
+            batchOffset += batchSize;
+            hasMore = batchData.length === batchSize && allData.length < maxRecordsToFetch;
           } else {
             hasMore = false;
           }
+        } catch (err: any) {
+          console.error(`[Batch Fetch Exception] Offset: ${batchOffset}, Error:`, err);
+          // If we have some data, continue with what we have
+          if (allData.length > 0) {
+            console.log(`[Batch Fetch] Stopping due to exception, but continuing with ${allData.length} records`);
+            break;
+          }
+          throw err;
         }
-        
-        // Use the count from first batch, or fallback to actual length
-        totalCount = firstBatchCount > 0 ? firstBatchCount : allData.length;
-      } else {
-        // For non-unique queries, use the regular fetch (but still might need pagination for large datasets)
-        const { data: queryData, error: queryError, count: queryCount } = await customSortQuery.limit(10000);
-        if (queryError) throw queryError;
-        allData = queryData || [];
-        totalCount = queryCount || allData.length;
       }
+      
+      if (allData.length >= maxRecordsToFetch) {
+        console.warn(`[Batch Fetch] Hit max records limit (${maxRecordsToFetch}), sorting will be limited to these records`);
+      }
+      
+      console.log(`[Batch Fetch Complete] Total records fetched: ${allData.length}`);
+      
+      // Use the count from first batch, or fallback to actual length
+      totalCount = firstBatchCount > 0 ? firstBatchCount : allData.length;
 
       // Get all normalized usernames for avg_views enrichment
       const normalizedUsernames = Array.from(
@@ -461,34 +789,85 @@ export async function GET(request: NextRequest) {
       // Update count after filtering
       count = enrichedAll.length;
       console.log(`[Count Update] Final count after all filters: ${count}, uniqueCreators: ${uniqueCreators}`);
+      console.log(`[Sort Params] sortBy: ${sortBy}, sortOrder: ${sortOrder}, ascending: ${ascending}`);
 
       // Sort based on the selected column
+      // Use consistent null handling: null values go to the end (or beginning) based on sort order
+      console.log(`[Before Sort] First 5 records:`, enrichedAll.slice(0, 5).map(r => ({ 
+        username: r.username, 
+        price_per_video: r.price_per_video,
+        avg_views: r.avg_views,
+        owner_name: r.owner_name
+      })));
+      
       if (sortBy === 'avg_views') {
         enrichedAll.sort((a, b) => {
-          const aVal = a.avg_views ?? -1;
-          const bVal = b.avg_views ?? -1;
-          return ascending ? aVal - bVal : bVal - aVal;
+          // Convert to numbers, handling strings and nulls
+          const aNum = a.avg_views != null ? Number(a.avg_views) : null;
+          const bNum = b.avg_views != null ? Number(b.avg_views) : null;
+          // Handle null values: put them at the end
+          if (aNum === null || aNum === undefined || isNaN(aNum)) return 1;
+          if (bNum === null || bNum === undefined || isNaN(bNum)) return -1;
+          // Both have valid numeric values, compare them
+          return ascending ? aNum - bNum : bNum - aNum;
         });
       } else if (sortBy === 'owner_name') {
         // Case-insensitive string sorting
         enrichedAll.sort((a, b) => {
           const aVal = (a.owner_name || '').toLowerCase();
           const bVal = (b.owner_name || '').toLowerCase();
+          // Handle empty strings: put them at the end
+          if (!aVal && !bVal) return 0;
+          if (!aVal) return 1;
+          if (!bVal) return -1;
+          // Both have values, compare them
           if (aVal < bVal) return ascending ? -1 : 1;
           if (aVal > bVal) return ascending ? 1 : -1;
           return 0;
         });
       } else if (sortBy === 'price_per_video') {
-        // Numeric sorting for price_per_video - same pattern as avg_views
+        // Numeric sorting for price_per_video
+        console.log(`[Price Per Video Sort] Starting sort, ascending: ${ascending}`);
+        console.log(`[Price Per Video Sort] Sample values before sort:`, enrichedAll.slice(0, 10).map(r => r.price_per_video));
+        
         enrichedAll.sort((a, b) => {
-          const aVal = a.price_per_video ?? -1;
-          const bVal = b.price_per_video ?? -1;
-          return ascending ? aVal - bVal : bVal - aVal;
+          // Convert to numbers, handling strings and nulls
+          // Note: 0 is a valid value, only null/undefined/NaN should be treated as missing
+          const aNum = a.price_per_video != null && !isNaN(Number(a.price_per_video)) ? Number(a.price_per_video) : null;
+          const bNum = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : null;
+          // Handle null/undefined/NaN values: put them at the end
+          if (aNum === null) return 1;
+          if (bNum === null) return -1;
+          // Both have valid numeric values (including 0), compare them
+          const result = ascending ? aNum - bNum : bNum - aNum;
+          return result;
         });
+        
+        console.log(`[Price Per Video Sort] Sample values after sort:`, enrichedAll.slice(0, 10).map(r => r.price_per_video));
+        console.log(`[Price Per Video Sort] Last 10 values after sort:`, enrichedAll.slice(-10).map(r => r.price_per_video));
       }
+      
+      console.log(`[After Sort] sortBy: ${sortBy}, sortOrder: ${ascending ? 'asc' : 'desc'}, total records: ${enrichedAll.length}`);
+      console.log(`[After Sort] First 5 records:`, enrichedAll.slice(0, 5).map(r => ({ 
+        username: r.username, 
+        price_per_video: r.price_per_video,
+        avg_views: r.avg_views,
+        owner_name: r.owner_name
+      })));
+      console.log(`[After Sort] Last 5 records:`, enrichedAll.slice(-5).map(r => ({ 
+        username: r.username, 
+        price_per_video: r.price_per_video,
+        avg_views: r.avg_views,
+        owner_name: r.owner_name
+      })));
 
-      // Apply pagination to sorted data
-      data = enrichedAll.slice(offset, offset + limit);
+      // Apply pagination to sorted data (use the original offset from query params, not batchOffset)
+      const paginationOffset = (page - 1) * limit;
+      console.log(`[Pagination] page: ${page}, limit: ${limit}, paginationOffset: ${paginationOffset}, slice: [${paginationOffset}, ${paginationOffset + limit}]`);
+      console.log(`[Before Pagination] First 10 price_per_video values:`, enrichedAll.slice(0, 10).map(r => ({ username: r.username, price_per_video: r.price_per_video })));
+      data = enrichedAll.slice(paginationOffset, paginationOffset + limit);
+      console.log(`[Final Data] Returning ${data.length} records`);
+      console.log(`[Final Data] First 5 records price_per_video:`, data.slice(0, 5).map(r => ({ username: r.username, price_per_video: r.price_per_video })));
     } else {
       // For other columns, use database sorting (more efficient)
       // But if uniqueCreators is true, we still need to fetch all data first
@@ -498,64 +877,87 @@ export async function GET(request: NextRequest) {
         let allData: any[] = [];
         let totalCount = 0;
         
-        if (uniqueCreators) {
-          // When uniqueCreators is true, fetch ALL data in batches
-          const batchSize = 1000;
-          let offset = 0;
-          let hasMore = true;
-          let firstBatchCount = 0;
+        // Always fetch in batches to handle datasets larger than 1000 records
+        const batchSize = 1000;
+        let batchOffset = 0;
+        let hasMore = true;
+        let firstBatchCount = 0;
+        
+        // Build a query for fetching all data
+        // Note: query already has select() called, so we need to rebuild it
+        let baseQuery = supabase
+          .from('reference_orders')
+          .select(`
+            id,
+            influencer_id,
+            username,
+            normalized_username,
+            email,
+            account_link,
+            owner_name,
+            approved_vendor,
+            total_fee_per_import,
+            price_usd,
+            video_count,
+            final_price,
+            price_per_video,
+            songs,
+            paid,
+            date_paid,
+            video_links,
+            created_at
+          `, { count: 'exact' });
+        
+        // Reapply all filters from the original query
+        if (search) {
+          const encoded = `%${search}%`;
+          baseQuery = baseQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+        }
+        if (owner) {
+          baseQuery = baseQuery.ilike('owner_name', `%${owner}%`);
+        }
+        if (approved === 'yes') {
+          baseQuery = baseQuery.eq('approved_vendor', true);
+        } else if (approved === 'no') {
+          baseQuery = baseQuery.eq('approved_vendor', false);
+        }
+        if (paid === 'paid') {
+          baseQuery = baseQuery.eq('paid', true);
+        } else if (paid === 'unpaid') {
+          baseQuery = baseQuery.eq('paid', false);
+        }
+        if (matched === 'true') {
+          baseQuery = baseQuery.not('influencer_id', 'is', null);
+        } else if (matched === 'false') {
+          baseQuery = baseQuery.is('influencer_id', null);
+        }
+        if (dateFrom) {
+          baseQuery = baseQuery.gte('date_paid', dateFrom);
+        }
+        if (dateTo) {
+          baseQuery = baseQuery.lte('date_paid', dateTo);
+        }
+        
+        while (hasMore) {
+          const { data: batchData, error: batchError, count: batchCount } = await baseQuery.range(batchOffset, batchOffset + batchSize - 1);
+          if (batchError) throw batchError;
           
-          // Build a query without filters for unique creators
-          let baseQuery = supabase
-            .from('reference_orders')
-            .select(`
-              id,
-              influencer_id,
-              username,
-              normalized_username,
-              email,
-              account_link,
-              owner_name,
-              approved_vendor,
-              total_fee_per_import,
-              price_usd,
-              video_count,
-              final_price,
-              price_per_video,
-              songs,
-              paid,
-              date_paid,
-              video_links,
-              created_at
-            `, { count: 'exact' });
-          
-          while (hasMore) {
-            const { data: batchData, error: batchError, count: batchCount } = await baseQuery.range(offset, offset + batchSize - 1);
-            if (batchError) throw batchError;
-            
-            // Get total count from first batch
-            if (offset === 0 && batchCount !== null) {
-              firstBatchCount = batchCount;
-            }
-            
-            if (batchData && batchData.length > 0) {
-              allData = allData.concat(batchData);
-              offset += batchSize;
-              hasMore = batchData.length === batchSize;
-            } else {
-              hasMore = false;
-            }
+          // Get total count from first batch
+          if (batchOffset === 0 && batchCount !== null) {
+            firstBatchCount = batchCount;
           }
           
-          // Use the count from first batch, or fallback to actual length
-          totalCount = firstBatchCount > 0 ? firstBatchCount : allData.length;
-        } else {
-          // For non-unique queries with avg views filters, use regular fetch
-          const { data: queryData, error: queryError, count: queryCount } = await query.limit(10000);
-          if (queryError) throw queryError;
-          allData = queryData || [];
-          totalCount = queryCount || allData.length;
+          if (batchData && batchData.length > 0) {
+            allData = allData.concat(batchData);
+            batchOffset += batchSize;
+            hasMore = batchData.length === batchSize;
+          } else {
+            hasMore = false;
+          }
         }
+        
+        // Use the count from first batch, or fallback to actual length
+        totalCount = firstBatchCount > 0 ? firstBatchCount : allData.length;
         
         // Don't set count here - it will be set after filtering
         let enrichedData = allData || [];
@@ -655,14 +1057,31 @@ export async function GET(request: NextRequest) {
         enrichedData.sort((a: any, b: any) => {
           const aVal = a[sortColumn];
           const bVal = b[sortColumn];
+          // Handle null/undefined values: put them at the end
           if (aVal === null || aVal === undefined) return 1;
           if (bVal === null || bVal === undefined) return -1;
+          // Handle empty strings for string columns
+          if (sortColumn === 'owner_name' || sortColumn === 'username') {
+            if (!aVal && !bVal) return 0;
+            if (!aVal) return 1;
+            if (!bVal) return -1;
+          }
+          // Compare values
           if (aVal < bVal) return ascending ? -1 : 1;
           if (aVal > bVal) return ascending ? 1 : -1;
           return 0;
         });
+        
+        console.log(`[Sort Debug - Branch 2] sortBy: ${sortColumn}, sortOrder: ${ascending ? 'asc' : 'desc'}, total records: ${enrichedData.length}, first 3 values:`, 
+          enrichedData.slice(0, 3).map((r: any) => ({ 
+            username: r.username, 
+            [sortColumn]: r[sortColumn] 
+          }))
+        );
 
-        data = enrichedData.slice(offset, offset + limit);
+        // Apply pagination to sorted data (use the original offset from query params, not batchOffset)
+        const paginationOffset = (page - 1) * limit;
+        data = enrichedData.slice(paginationOffset, paginationOffset + limit);
       } else {
         // Standard path: use database sorting (more efficient)
         query = query.order(sortColumn, { ascending, nullsFirst: false });
@@ -740,6 +1159,12 @@ export async function GET(request: NextRequest) {
         totalSpend: summaryRow?.total_spend || 0,
       },
       owners: ownerStats || [],
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
     });
   } catch (error: any) {
     console.error('Reference orders API error:', error);
