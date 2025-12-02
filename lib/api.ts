@@ -175,6 +175,21 @@ export async function downloadTemplate(format: 'csv' | 'excel'): Promise<Blob> {
   }
 }
 
+export async function exportReferenceOrders(format: 'csv' | 'excel'): Promise<Blob> {
+  try {
+    const endpoint = format === 'csv' ? 'export/csv' : 'export/excel';
+    const response = await fetch(`${API_URL}/api/v1/reference-orders/${endpoint}`);
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Export failed');
+    }
+    return await response.blob();
+  } catch (error: any) {
+    throw new Error(error.message || 'Export failed');
+  }
+}
+
 export async function detectRegion(influencerIds: string[]): Promise<{ status: string; message: string; processed: number; total: number }> {
   try {
     const response = await fetch(`${API_URL}/api/v1/scrapers/detect-region`, {

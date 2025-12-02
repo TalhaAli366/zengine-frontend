@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video, StopCircle } from 'lucide-react';
-import { importReferenceOrders, ReferenceImportResult } from '@/lib/api';
+import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video, StopCircle, Download } from 'lucide-react';
+import { importReferenceOrders, ReferenceImportResult, exportReferenceOrders } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ReferenceOrderRow {
@@ -56,6 +56,7 @@ interface AvgViewJob {
   skip_existing?: boolean;
   status: string;
   total_requested?: number;
+  metadata?: { non_tiktok_skipped?: number; non_tiktok_examples?: string[] } | null;
   total_enqueued?: number;
   total_skipped?: number;
   total_processed?: number;
@@ -97,6 +98,16 @@ const toInputValue = (value?: number | string | null) => {
 const formatDateForInput = (value?: string | null) => {
   if (!value) return '';
   return value.split('T')[0];
+};
+
+const calculateVideoLinksCompletion = (videoLinks?: string | null, videoCount?: number | null): number | null => {
+  if (!videoCount || videoCount === 0) return null;
+  
+  const linksCount = videoLinks && videoLinks.trim() 
+    ? videoLinks.split('\n').filter(l => l.trim()).length 
+    : 0;
+  
+  return Math.round((linksCount / videoCount) * 100);
 };
 
 const SONGS_PER_PAGE = 20;
@@ -194,6 +205,7 @@ export default function ReferenceOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ReferenceImportResult | null>(null);
+  const [exporting, setExporting] = useState<'csv' | 'excel' | null>(null);
   const filteredSongs = useMemo(() => {
     const term = songSearch.trim().toLowerCase();
     if (!term) return songAnalytics;
@@ -421,14 +433,18 @@ export default function ReferenceOrdersPage() {
     // Initial load (with loading state)
     loadAvgViewJobs();
 
-    // Poll every 30 seconds silently in the background
+    // Check if there's a running job to determine polling frequency
+    const hasRunningJob = avgViewJobs.some(job => job.status === 'running' || job.status === 'pending');
+    const pollInterval = hasRunningJob ? 3000 : 30000; // Poll every 3 seconds if running, 30 seconds otherwise
+
+    // Poll silently in the background
     const interval = setInterval(() => {
       loadAvgViewJobs(true); // Silent polling - no loading indicator
-    }, 30000); // Increased from 15s to 30s
+    }, pollInterval);
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [avgViewJobs.length, avgViewJobs.map(j => j.status).join(',')]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -454,6 +470,31 @@ export default function ReferenceOrdersPage() {
       setError(err.message || 'Import failed');
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleExport = async (format: 'csv' | 'excel') => {
+    setExporting(format);
+    setError(null);
+
+    try {
+      const blob = await exportReferenceOrders(format);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `reference_orders.${format === 'csv' ? 'csv' : 'xlsx'}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setBanner({
+        type: 'success',
+        message: `Orders exported successfully as ${format.toUpperCase()}`,
+      });
+    } catch (err: any) {
+      setError(err.message || 'Export failed');
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -815,6 +856,42 @@ export default function ReferenceOrdersPage() {
                 disabled={importing}
               />
             </label>
+            <button
+              onClick={() => handleExport('csv')}
+              disabled={exporting !== null}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Export orders with avg views to CSV"
+            >
+              {exporting === 'csv' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => handleExport('excel')}
+              disabled={exporting !== null}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Export orders with avg views to Excel"
+            >
+              {exporting === 'excel' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  Export Excel
+                </>
+              )}
+            </button>
           </div>
         </div>
 
@@ -1071,6 +1148,9 @@ export default function ReferenceOrdersPage() {
                           <td className="px-4 py-3 text-gray-700 capitalize">{job.mode || 'manual'}</td>
                           <td className="px-4 py-3 text-gray-900 font-medium">
                             {numberFormatter.format(job.total_requested ?? 0)}
+                            {job.metadata?.non_tiktok_skipped ? (
+                              <div className="text-xs text-gray-500">{numberFormatter.format(job.metadata.non_tiktok_skipped)} non-TikTok skipped</div>
+                            ) : null}
                           </td>
                           <td className="px-4 py-3 text-gray-700">
                             {numberFormatter.format(job.total_processed ?? 0)}{' '}
@@ -1309,7 +1389,23 @@ export default function ReferenceOrdersPage() {
                             </button>
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Date Paid</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Price / Video</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
+                            <button
+                              onClick={() => toggleSort('price_per_video')}
+                              className="inline-flex items-center gap-1 hover:text-primary-600 transition-colors"
+                            >
+                              Price / Video
+                              {sortBy === 'price_per_video' ? (
+                                sortOrder === 'asc' ? (
+                                  <ArrowUp className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDown className="w-3 h-3" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-40" />
+                              )}
+                            </button>
+                          </th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Approved</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Paid</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Account</th>
@@ -1331,6 +1427,7 @@ export default function ReferenceOrdersPage() {
                             </button>
                           </th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Videos</th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Completion %</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
                         </tr>
                       </thead>
@@ -1447,6 +1544,32 @@ export default function ReferenceOrdersPage() {
                                 ) : (
                                   <span className="text-xs text-gray-400">No videos</span>
                                 )}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {(() => {
+                                  const completion = calculateVideoLinksCompletion(order.video_links, order.video_count);
+                                  if (completion === null) {
+                                    return <span className="text-xs text-gray-400">N/A</span>;
+                                  }
+                                  const linksCount = order.video_links && order.video_links.trim()
+                                    ? order.video_links.split('\n').filter(l => l.trim()).length
+                                    : 0;
+                                  const bgColor = completion === 100 
+                                    ? 'bg-green-100 text-green-700' 
+                                    : completion >= 50 
+                                    ? 'bg-yellow-100 text-yellow-700' 
+                                    : 'bg-red-100 text-red-700';
+                                  return (
+                                    <div className="flex flex-col gap-1">
+                                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${bgColor}`}>
+                                        {completion}%
+                                      </span>
+                                      <p className="text-xs text-gray-500">
+                                        {linksCount} / {order.video_count}
+                                      </p>
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="px-6 py-4 text-sm">
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

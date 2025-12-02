@@ -62,9 +62,12 @@ interface OutreachSelectionInfluencer {
 export default function InfluencersPage() {
   const router = useRouter();
   const [exporting, setExporting] = useState(false);
+  // note: enrich-all button removed; state cleaned up
   const [error, setError] = useState<string | null>(null);
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
   const [allInfluencers, setAllInfluencers] = useState<Influencer[]>([]);
+  const [analyticsInfluencers, setAnalyticsInfluencers] = useState<Influencer[]>([]);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [loadingInfluencers, setLoadingInfluencers] = useState(true);
   const [activeTab, setActiveTab] = useState<'list' | 'visualizations'>('list');
 
@@ -85,7 +88,7 @@ export default function InfluencersPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [hashtags, setHashtags] = useState<Hashtag[]>([]);
   const [sounds, setSounds] = useState<Sound[]>([]);
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
   const [showVisualizations, setShowVisualizations] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [detectingRegionId, setDetectingRegionId] = useState<string | null>(null);
@@ -154,6 +157,13 @@ export default function InfluencersPage() {
     loadFilters();
     loadInfluencers();
   }, [currentPage, selectedCampaign, debouncedSearch, minFollowers, maxFollowers, minEngagementRate, maxEngagementRate, minAvgViews, maxAvgViews, selectedHashtag, selectedSound, reachedOutFilter, onlyWithEmail]); // Reload when page or filters change
+
+  // Load all influencers for analytics when switching to visualizations tab
+  useEffect(() => {
+    if (activeTab === 'visualizations' && analyticsInfluencers.length === 0 && !loadingAnalytics) {
+      loadAllInfluencersForAnalytics();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -283,6 +293,67 @@ export default function InfluencersPage() {
       console.error('Error loading influencers:', err);
     } finally {
       setLoadingInfluencers(false);
+    }
+  };
+
+  const loadAllInfluencersForAnalytics = async () => {
+    try {
+      setLoadingAnalytics(true);
+      const allData: Influencer[] = [];
+      let page = 1;
+      let hasMore = true;
+      const limit = 1000; // Large page size to minimize requests
+
+      while (hasMore) {
+        const params = new URLSearchParams();
+        params.append('page', page.toString());
+        params.append('limit', limit.toString());
+
+        // Apply filters if any (for consistency)
+        if (selectedCampaign) params.append('campaign', selectedCampaign);
+        if (debouncedSearch) params.append('search', debouncedSearch);
+        if (minFollowers) params.append('min_followers', minFollowers);
+        if (maxFollowers) params.append('max_followers', maxFollowers);
+        if (minEngagementRate) params.append('min_engagement_rate', minEngagementRate);
+        if (maxEngagementRate) params.append('max_engagement_rate', maxEngagementRate);
+        if (minAvgViews) params.append('min_avg_views', minAvgViews);
+        if (maxAvgViews) params.append('max_avg_views', maxAvgViews);
+        if (selectedHashtag) params.append('hashtag_id', selectedHashtag);
+        if (selectedSound) params.append('sound_id', selectedSound);
+        if (reachedOutFilter) params.append('reached_out', reachedOutFilter);
+        if (onlyWithEmail) params.append('has_email', 'true');
+
+        const url = `/api/influencers?${params.toString()}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to load');
+        const result = await response.json();
+
+        let pageData: Influencer[] = [];
+        if (Array.isArray(result)) {
+          pageData = result;
+        } else {
+          pageData = result.data || [];
+        }
+
+        if (pageData.length > 0) {
+          allData.push(...pageData);
+          // If we got less than the limit, we've reached the end
+          if (pageData.length < limit) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      setAnalyticsInfluencers(allData);
+    } catch (err) {
+      console.error('Error loading all influencers for analytics:', err);
+      setAnalyticsInfluencers([]);
+    } finally {
+      setLoadingAnalytics(false);
     }
   };
 
@@ -604,6 +675,7 @@ export default function InfluencersPage() {
             >
               Clear Selection
             </button>
+            {/* Enrich All button removed - backend supports batch enrichment; use backend endpoints directly if needed */}
           </div>
         </div>
       </div>
@@ -1061,8 +1133,8 @@ export default function InfluencersPage() {
             </div>
           ) : influencers.length > 0 ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
+              <div className="overflow-x-auto overflow-y-visible">
+                <table className="w-full" style={{ minWidth: '1200px' }}>
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
@@ -1381,7 +1453,13 @@ export default function InfluencersPage() {
               Analytics & Visualizations
             </h2>
 
-            {allInfluencers.length === 0 ? (
+            {loadingAnalytics ? (
+              <div className="text-center py-12">
+                <Loader2 className="w-16 h-16 text-primary-600 mx-auto mb-4 animate-spin" />
+                <p className="text-gray-500">Loading analytics data...</p>
+                <p className="text-sm text-gray-400 mt-2">This may take a moment for large datasets</p>
+              </div>
+            ) : analyticsInfluencers.length === 0 ? (
               <div className="text-center py-12">
                 <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-500">No data available for visualizations</p>
@@ -1393,13 +1471,13 @@ export default function InfluencersPage() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                     <div className="text-sm text-blue-600 font-medium">Total Influencers</div>
-                    <div className="text-2xl font-bold text-blue-900 mt-1">{allInfluencers.length}</div>
+                    <div className="text-2xl font-bold text-blue-900 mt-1">{analyticsInfluencers.length}</div>
                   </div>
                   <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                     <div className="text-sm text-green-600 font-medium">Avg Engagement Rate</div>
                     <div className="text-2xl font-bold text-green-900 mt-1">
                       {(() => {
-                        const rates = allInfluencers.filter(inf => inf.engagement_rate).map(inf => inf.engagement_rate || 0);
+                        const rates = analyticsInfluencers.filter(inf => inf.engagement_rate).map(inf => inf.engagement_rate || 0);
                         return rates.length > 0 ? `${(rates.reduce((a, b) => a + b, 0) / rates.length).toFixed(2)}%` : '0.00%';
                       })()}
                     </div>
@@ -1407,13 +1485,13 @@ export default function InfluencersPage() {
                   <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
                     <div className="text-sm text-purple-600 font-medium">Total Followers</div>
                     <div className="text-2xl font-bold text-purple-900 mt-1">
-                      {(allInfluencers.reduce((sum, inf) => sum + (inf.followers || 0), 0) / 1000000).toFixed(1)}M
+                      {(analyticsInfluencers.reduce((sum, inf) => sum + (inf.followers || 0), 0) / 1000000).toFixed(1)}M
                     </div>
                   </div>
                   <div className="bg-orange-50 rounded-lg p-4 border border-orange-200">
                     <div className="text-sm text-orange-600 font-medium">Countries</div>
                     <div className="text-2xl font-bold text-orange-900 mt-1">
-                      {new Set(allInfluencers.map(inf => inf.country).filter(Boolean)).size}
+                      {new Set(analyticsInfluencers.map(inf => inf.country).filter(Boolean)).size}
                     </div>
                   </div>
                 </div>
@@ -1422,7 +1500,7 @@ export default function InfluencersPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Performers by Engagement Rate</h3>
                   <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={allInfluencers
+                    <BarChart data={analyticsInfluencers
                       .filter(inf => inf.engagement_rate)
                       .sort((a, b) => (b.engagement_rate || 0) - (a.engagement_rate || 0))
                       .slice(0, 10)
@@ -1451,7 +1529,7 @@ export default function InfluencersPage() {
                         range: i === 0 ? '0-1%' :
                           i === buckets.length - 1 ? `${buckets[i - 1]}+%` :
                             `${buckets[i - 1]}-${buckets[i]}%`,
-                        count: allInfluencers.filter(inf => {
+                        count: analyticsInfluencers.filter(inf => {
                           const rate = inf.engagement_rate || 0;
                           if (i === 0) return rate >= 0 && rate < 1;
                           if (i === buckets.length - 1) return rate >= buckets[i - 1];
@@ -1477,7 +1555,7 @@ export default function InfluencersPage() {
                       <Pie
                         data={(() => {
                           const countryCounts: Record<string, number> = {};
-                          allInfluencers.forEach(inf => {
+                          analyticsInfluencers.forEach(inf => {
                             const country = inf.country || 'Unknown';
                             countryCounts[country] = (countryCounts[country] || 0) + 1;
                           });
@@ -1528,7 +1606,7 @@ export default function InfluencersPage() {
                       <Tooltip cursor={{ strokeDasharray: '3 3' }} />
                       <Scatter
                         name="Influencers"
-                        data={allInfluencers
+                        data={analyticsInfluencers
                           .filter(inf => inf.engagement_rate && inf.followers && inf.followers > 0)
                           .map(inf => ({
                             followers: inf.followers || 0,
@@ -1550,7 +1628,7 @@ export default function InfluencersPage() {
                         range: i === 0 ? '0-10K' :
                           i === buckets.length - 1 ? `${buckets[i - 1] / 1000}K+` :
                             `${buckets[i - 1] / 1000}K-${buckets[i] / 1000}K`,
-                        count: allInfluencers.filter(inf => {
+                        count: analyticsInfluencers.filter(inf => {
                           const followers = inf.followers || 0;
                           if (i === 0) return followers >= 0 && followers < 10000;
                           if (i === buckets.length - 1) return followers >= buckets[i - 1];

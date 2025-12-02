@@ -110,9 +110,9 @@ export async function GET(request: NextRequest) {
     let data: any[] = [];
     let count = 0;
 
-    // For avg_views and owner_name sorting, we need to fetch all, sort, then paginate
-    // (owner_name needs case-insensitive sorting which Supabase doesn't support easily)
-    if (sortBy === 'avg_views' || sortBy === 'owner_name') {
+    // For avg_views, owner_name, and price_per_video sorting, we need to fetch all, sort, then paginate
+    // (owner_name needs case-insensitive sorting, price_per_video needs to sort across all pages)
+    if (sortBy === 'avg_views' || sortBy === 'owner_name' || sortBy === 'price_per_video') {
       // Fetch ALL matching records (without pagination) to sort them properly
       const { data: allData, error: allError, count: totalCount } = await query;
       if (allError) throw allError;
@@ -174,6 +174,13 @@ export async function GET(request: NextRequest) {
           if (aVal < bVal) return ascending ? -1 : 1;
           if (aVal > bVal) return ascending ? 1 : -1;
           return 0;
+        });
+      } else if (sortBy === 'price_per_video') {
+        // Numeric sorting for price_per_video
+        enrichedAll.sort((a, b) => {
+          const aVal = a.price_per_video ?? (ascending ? Infinity : -Infinity);
+          const bVal = b.price_per_video ?? (ascending ? Infinity : -Infinity);
+          return ascending ? aVal - bVal : bVal - aVal;
         });
       }
 
