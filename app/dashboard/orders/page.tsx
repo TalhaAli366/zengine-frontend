@@ -194,6 +194,9 @@ export default function ReferenceOrdersPage() {
   const [matchedFilter, setMatchedFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [minAvgViews, setMinAvgViews] = useState('');
+  const [maxAvgViews, setMaxAvgViews] = useState('');
+  const [uniqueCreators, setUniqueCreators] = useState(false);
   const [sortBy, setSortBy] = useState('date_paid');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -305,6 +308,9 @@ export default function ReferenceOrdersPage() {
       if (matchedFilter) params.append('matched', matchedFilter);
       if (dateFrom) params.append('date_from', dateFrom);
       if (dateTo) params.append('date_to', dateTo);
+      if (minAvgViews) params.append('min_avg_views', minAvgViews);
+      if (maxAvgViews) params.append('max_avg_views', maxAvgViews);
+      if (uniqueCreators) params.append('unique_creators', 'true');
       if (sortBy) params.append('sort_by', sortBy);
       if (sortOrder) params.append('sort_order', sortOrder);
 
@@ -408,7 +414,7 @@ export default function ReferenceOrdersPage() {
   useEffect(() => {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, ownerFilter, approvedFilter, paidFilter, matchedFilter, dateFrom, dateTo, sortBy, sortOrder, currentPage]);
+  }, [search, ownerFilter, approvedFilter, paidFilter, matchedFilter, dateFrom, dateTo, minAvgViews, maxAvgViews, uniqueCreators, sortBy, sortOrder, currentPage]);
 
   useEffect(() => {
     loadSongAnalytics({ background: true });
@@ -609,7 +615,7 @@ export default function ReferenceOrdersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...payload,
-          skip_existing: true,
+          skip_existing: false, // Allow refreshing even if avg_views exist
         }),
       });
       const data = await response.json();
@@ -666,6 +672,9 @@ export default function ReferenceOrdersPage() {
     setMatchedFilter('');
     setDateFrom('');
     setDateTo('');
+    setMinAvgViews('');
+    setMaxAvgViews('');
+    setUniqueCreators(false);
     setCurrentPage(1);
   };
 
@@ -1325,6 +1334,48 @@ export default function ReferenceOrdersPage() {
                     }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Min Avg Views</label>
+                  <input
+                    type="number"
+                    value={minAvgViews}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setMinAvgViews(e.target.value);
+                    }}
+                    onBlur={() => loadOrders()}
+                    placeholder="e.g. 1000"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Max Avg Views</label>
+                  <input
+                    type="number"
+                    value={maxAvgViews}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setMaxAvgViews(e.target.value);
+                    }}
+                    onBlur={() => loadOrders()}
+                    placeholder="e.g. 1000000"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div className="flex items-center">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={uniqueCreators}
+                      onChange={(e) => {
+                        setCurrentPage(1);
+                        setUniqueCreators(e.target.checked);
+                      }}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Show only unique creators</span>
+                  </label>
                 </div>
               </div>
             </div>
