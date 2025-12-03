@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Users, Search, Filter, X, Trash2, ChevronLeft, ChevronRight, MapPin, BarChart3, TrendingUp, CalendarDays, DollarSign, Edit2 } from 'lucide-react';
+import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Users, Search, Filter, X, Trash2, ChevronLeft, ChevronRight, MapPin, BarChart3, TrendingUp, CalendarDays, DollarSign, Edit2, ChevronUp, ChevronDown } from 'lucide-react';
 import { detectRegion } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ScatterChart, Scatter, LineChart, Line } from 'recharts';
 
@@ -71,9 +71,8 @@ export default function InfluencersPage() {
   const [loadingInfluencers, setLoadingInfluencers] = useState(true);
   const [activeTab, setActiveTab] = useState<'list' | 'visualizations'>('list');
 
-  // Filter states
+  // Pending filter states (what user is typing)
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState('');
   const [minFollowers, setMinFollowers] = useState('');
   const [maxFollowers, setMaxFollowers] = useState('');
@@ -85,6 +84,20 @@ export default function InfluencersPage() {
   const [selectedSound, setSelectedSound] = useState('');
   const [reachedOutFilter, setReachedOutFilter] = useState('');
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
+  
+  // Applied filter states (what's actually being used for queries)
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
+  const [appliedSelectedCampaign, setAppliedSelectedCampaign] = useState('');
+  const [appliedMinFollowers, setAppliedMinFollowers] = useState('');
+  const [appliedMaxFollowers, setAppliedMaxFollowers] = useState('');
+  const [appliedMinEngagementRate, setAppliedMinEngagementRate] = useState('');
+  const [appliedMaxEngagementRate, setAppliedMaxEngagementRate] = useState('');
+  const [appliedMinAvgViews, setAppliedMinAvgViews] = useState('');
+  const [appliedMaxAvgViews, setAppliedMaxAvgViews] = useState('');
+  const [appliedSelectedHashtag, setAppliedSelectedHashtag] = useState('');
+  const [appliedSelectedSound, setAppliedSelectedSound] = useState('');
+  const [appliedReachedOutFilter, setAppliedReachedOutFilter] = useState('');
+  const [appliedOnlyWithEmail, setAppliedOnlyWithEmail] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [hashtags, setHashtags] = useState<Hashtag[]>([]);
   const [sounds, setSounds] = useState<Sound[]>([]);
@@ -110,6 +123,8 @@ export default function InfluencersPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(true);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -137,26 +152,55 @@ export default function InfluencersPage() {
     return parsed.toLocaleDateString();
   };
 
-  // Debounce search query to avoid excessive API calls
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  // Reset to page 1 when search changes
-  useEffect(() => {
-    if (debouncedSearch !== '') {
-      setCurrentPage(1);
-    }
-  }, [debouncedSearch]);
+  // Apply filters function - copies pending filters to applied filters
+  const applyFilters = () => {
+    setAppliedSearchQuery(searchQuery);
+    setAppliedSelectedCampaign(selectedCampaign);
+    setAppliedMinFollowers(minFollowers);
+    setAppliedMaxFollowers(maxFollowers);
+    setAppliedMinEngagementRate(minEngagementRate);
+    setAppliedMaxEngagementRate(maxEngagementRate);
+    setAppliedMinAvgViews(minAvgViews);
+    setAppliedMaxAvgViews(maxAvgViews);
+    setAppliedSelectedHashtag(selectedHashtag);
+    setAppliedSelectedSound(selectedSound);
+    setAppliedReachedOutFilter(reachedOutFilter);
+    setAppliedOnlyWithEmail(onlyWithEmail);
+    setCurrentPage(1);
+  };
 
   useEffect(() => {
     loadCampaigns();
     loadFilters();
     loadInfluencers();
-  }, [currentPage, selectedCampaign, debouncedSearch, minFollowers, maxFollowers, minEngagementRate, maxEngagementRate, minAvgViews, maxAvgViews, selectedHashtag, selectedSound, reachedOutFilter, onlyWithEmail]); // Reload when page or filters change
+  }, [currentPage, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail]); // Reload when page or applied filters change
+
+  // Scroll position detection for scroll buttons
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = document.documentElement.clientHeight;
+      const isAtTop = scrollTop < 100;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 100;
+
+      setShowScrollToTop(!isAtTop);
+      setShowScrollToBottom(!isAtBottom);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    handleScroll(); // Check initial position
+
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollToBottom = () => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+  };
 
   // Load all influencers for analytics when switching to visualizations tab
   useEffect(() => {
@@ -258,19 +302,19 @@ export default function InfluencersPage() {
       params.append('page', currentPage.toString());
       params.append('limit', itemsPerPage.toString());
 
-      // Filters
-      if (selectedCampaign) params.append('campaign', selectedCampaign);
-      if (debouncedSearch) params.append('search', debouncedSearch);
-      if (minFollowers) params.append('min_followers', minFollowers);
-      if (maxFollowers) params.append('max_followers', maxFollowers);
-      if (minEngagementRate) params.append('min_engagement_rate', minEngagementRate);
-      if (maxEngagementRate) params.append('max_engagement_rate', maxEngagementRate);
-      if (minAvgViews) params.append('min_avg_views', minAvgViews);
-      if (maxAvgViews) params.append('max_avg_views', maxAvgViews);
-      if (selectedHashtag) params.append('hashtag_id', selectedHashtag);
-      if (selectedSound) params.append('sound_id', selectedSound);
-      if (reachedOutFilter) params.append('reached_out', reachedOutFilter);
-      if (onlyWithEmail) params.append('has_email', 'true');
+      // Filters (use applied filters)
+      if (appliedSelectedCampaign) params.append('campaign', appliedSelectedCampaign);
+      if (appliedSearchQuery) params.append('search', appliedSearchQuery);
+      if (appliedMinFollowers) params.append('min_followers', appliedMinFollowers);
+      if (appliedMaxFollowers) params.append('max_followers', appliedMaxFollowers);
+      if (appliedMinEngagementRate) params.append('min_engagement_rate', appliedMinEngagementRate);
+      if (appliedMaxEngagementRate) params.append('max_engagement_rate', appliedMaxEngagementRate);
+      if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
+      if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
+      if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
+      if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
+      if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
+      if (appliedOnlyWithEmail) params.append('has_email', 'true');
 
       const url = `/api/influencers?${params.toString()}`;
       const response = await fetch(url);
@@ -309,19 +353,19 @@ export default function InfluencersPage() {
         params.append('page', page.toString());
         params.append('limit', limit.toString());
 
-        // Apply filters if any (for consistency)
-        if (selectedCampaign) params.append('campaign', selectedCampaign);
-        if (debouncedSearch) params.append('search', debouncedSearch);
-        if (minFollowers) params.append('min_followers', minFollowers);
-        if (maxFollowers) params.append('max_followers', maxFollowers);
-        if (minEngagementRate) params.append('min_engagement_rate', minEngagementRate);
-        if (maxEngagementRate) params.append('max_engagement_rate', maxEngagementRate);
-        if (minAvgViews) params.append('min_avg_views', minAvgViews);
-        if (maxAvgViews) params.append('max_avg_views', maxAvgViews);
-        if (selectedHashtag) params.append('hashtag_id', selectedHashtag);
-        if (selectedSound) params.append('sound_id', selectedSound);
-        if (reachedOutFilter) params.append('reached_out', reachedOutFilter);
-        if (onlyWithEmail) params.append('has_email', 'true');
+        // Apply filters if any (for consistency - use applied filters)
+        if (appliedSelectedCampaign) params.append('campaign', appliedSelectedCampaign);
+        if (appliedSearchQuery) params.append('search', appliedSearchQuery);
+        if (appliedMinFollowers) params.append('min_followers', appliedMinFollowers);
+        if (appliedMaxFollowers) params.append('max_followers', appliedMaxFollowers);
+        if (appliedMinEngagementRate) params.append('min_engagement_rate', appliedMinEngagementRate);
+        if (appliedMaxEngagementRate) params.append('max_engagement_rate', appliedMaxEngagementRate);
+        if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
+        if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
+        if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
+        if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
+        if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
+        if (appliedOnlyWithEmail) params.append('has_email', 'true');
 
         const url = `/api/influencers?${params.toString()}`;
         const response = await fetch(url);
@@ -428,7 +472,30 @@ export default function InfluencersPage() {
 
     try {
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem('outreachSelection', JSON.stringify(payload));
+        // Merge with existing selection in localStorage instead of replacing
+        const existingSelectionStr = window.localStorage.getItem('outreachSelection');
+        let existingSelection: OutreachSelectionInfluencer[] = [];
+        
+        if (existingSelectionStr) {
+          try {
+            const parsed = JSON.parse(existingSelectionStr);
+            if (Array.isArray(parsed)) {
+              existingSelection = parsed;
+            }
+          } catch (e) {
+            console.warn('Failed to parse existing selection, starting fresh:', e);
+          }
+        }
+        
+        // Merge: deduplicate by email (most reliable identifier)
+        const existingEmails = new Set(existingSelection.map(inf => inf.email?.toLowerCase()).filter(Boolean));
+        const newItems = payload.filter(inf => {
+          const emailLower = inf.email?.toLowerCase();
+          return emailLower && !existingEmails.has(emailLower);
+        });
+        
+        const mergedSelection = [...existingSelection, ...newItems];
+        window.localStorage.setItem('outreachSelection', JSON.stringify(mergedSelection));
       }
       router.push('/dashboard/outreach?source=influencers');
     } catch (error) {
@@ -457,11 +524,24 @@ export default function InfluencersPage() {
     setSelectedSound('');
     setReachedOutFilter('');
     setOnlyWithEmail(false);
+    // Also clear applied filters
+    setAppliedSearchQuery('');
+    setAppliedSelectedCampaign('');
+    setAppliedMinFollowers('');
+    setAppliedMaxFollowers('');
+    setAppliedMinEngagementRate('');
+    setAppliedMaxEngagementRate('');
+    setAppliedMinAvgViews('');
+    setAppliedMaxAvgViews('');
+    setAppliedSelectedHashtag('');
+    setAppliedSelectedSound('');
+    setAppliedReachedOutFilter('');
+    setAppliedOnlyWithEmail(false);
     setCurrentPage(1); // Reset to first page
-    loadInfluencers();
+    // loadInfluencers will be called automatically via useEffect when applied filters change
   };
 
-  const hasActiveFilters = searchQuery || selectedCampaign || minFollowers || maxFollowers || minEngagementRate || maxEngagementRate || minAvgViews || maxAvgViews || selectedHashtag || selectedSound || reachedOutFilter || onlyWithEmail;
+  const hasActiveFilters = appliedSearchQuery || appliedSelectedCampaign || appliedMinFollowers || appliedMaxFollowers || appliedMinEngagementRate || appliedMaxEngagementRate || appliedMinAvgViews || appliedMaxAvgViews || appliedSelectedHashtag || appliedSelectedSound || appliedReachedOutFilter || appliedOnlyWithEmail;
   const hasSelection = selectedInfluencerIds.length > 0;
   const pageSelectionCount = influencers.filter(inf => selectedInfluencerIds.includes(inf.id)).length;
   const allPageSelected = influencers.length > 0 && pageSelectionCount === influencers.length;
@@ -740,12 +820,21 @@ export default function InfluencersPage() {
                   </button>
                 )}
               </div>
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className="text-sm text-gray-600 hover:text-gray-900"
-              >
-                {showFilters ? 'Hide' : 'Show'} Filters
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={applyFilters}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Filter className="w-4 h-4" />
+                  Apply Filters
+                </button>
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="text-sm text-gray-600 hover:text-gray-900"
+                >
+                  {showFilters ? 'Hide' : 'Show'} Filters
+                </button>
+              </div>
             </div>
 
             {showFilters && (
@@ -761,6 +850,11 @@ export default function InfluencersPage() {
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          applyFilters();
+                        }
+                      }}
                       placeholder="Search influencers..."
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     />
@@ -774,10 +868,7 @@ export default function InfluencersPage() {
                   </label>
                   <select
                     value={selectedCampaign}
-                    onChange={(e) => {
-                      setSelectedCampaign(e.target.value);
-                      setCurrentPage(1);
-                    }}
+                    onChange={(e) => setSelectedCampaign(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All Campaigns</option>
@@ -796,10 +887,7 @@ export default function InfluencersPage() {
                   </label>
                   <select
                     value={selectedHashtag}
-                    onChange={(e) => {
-                      setSelectedHashtag(e.target.value);
-                      setCurrentPage(1);
-                    }}
+                    onChange={(e) => setSelectedHashtag(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All Hashtags</option>
@@ -818,10 +906,7 @@ export default function InfluencersPage() {
                   </label>
                   <select
                     value={selectedSound}
-                    onChange={(e) => {
-                      setSelectedSound(e.target.value);
-                      setCurrentPage(1);
-                    }}
+                    onChange={(e) => setSelectedSound(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All Sounds</option>
@@ -840,10 +925,7 @@ export default function InfluencersPage() {
                   </label>
                   <select
                     value={reachedOutFilter}
-                    onChange={(e) => {
-                      setReachedOutFilter(e.target.value);
-                      setCurrentPage(1);
-                    }}
+                    onChange={(e) => setReachedOutFilter(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All Statuses</option>
@@ -861,9 +943,10 @@ export default function InfluencersPage() {
                     type="number"
                     value={minFollowers}
                     onChange={(e) => setMinFollowers(e.target.value)}
-                    onBlur={() => {
-                      setCurrentPage(1);
-                      loadInfluencers();
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. 1000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -879,9 +962,10 @@ export default function InfluencersPage() {
                     type="number"
                     value={maxFollowers}
                     onChange={(e) => setMaxFollowers(e.target.value)}
-                    onBlur={() => {
-                      setCurrentPage(1);
-                      loadInfluencers();
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. 1000000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -898,9 +982,10 @@ export default function InfluencersPage() {
                     step="0.1"
                     value={minEngagementRate}
                     onChange={(e) => setMinEngagementRate(e.target.value)}
-                    onBlur={() => {
-                      setCurrentPage(1);
-                      loadInfluencers();
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. 1.0"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -917,9 +1002,10 @@ export default function InfluencersPage() {
                     step="0.1"
                     value={maxEngagementRate}
                     onChange={(e) => setMaxEngagementRate(e.target.value)}
-                    onBlur={() => {
-                      setCurrentPage(1);
-                      loadInfluencers();
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. 10.0"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -935,9 +1021,10 @@ export default function InfluencersPage() {
                     type="number"
                     value={minAvgViews}
                     onChange={(e) => setMinAvgViews(e.target.value)}
-                    onBlur={() => {
-                      setCurrentPage(1);
-                      loadInfluencers();
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. 1000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -953,9 +1040,10 @@ export default function InfluencersPage() {
                     type="number"
                     value={maxAvgViews}
                     onChange={(e) => setMaxAvgViews(e.target.value)}
-                    onBlur={() => {
-                      setCurrentPage(1);
-                      loadInfluencers();
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. 1000000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -968,10 +1056,7 @@ export default function InfluencersPage() {
                     id="only-with-email"
                     type="checkbox"
                     checked={onlyWithEmail}
-                    onChange={(e) => {
-                      setOnlyWithEmail(e.target.checked);
-                      setCurrentPage(1);
-                    }}
+                    onChange={(e) => setOnlyWithEmail(e.target.checked)}
                     className="h-4 w-4 text-blue-600 border-gray-300 rounded"
                   />
                   <label htmlFor="only-with-email" className="text-sm font-medium text-gray-700">
@@ -1644,13 +1729,58 @@ export default function InfluencersPage() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+
+                {/* Employee Outreach Tracking */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Creators Approached by Employee</h3>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <BarChart
+                      data={(() => {
+                        const employeeCounts: Record<string, number> = {};
+                        analyticsInfluencers.forEach(inf => {
+                          const employee = inf.reached_by || 'Unassigned';
+                          employeeCounts[employee] = (employeeCounts[employee] || 0) + 1;
+                        });
+                        return Object.entries(employeeCounts)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 15)
+                          .map(([name, value]) => ({ name, value }));
+                      })()}
+                      layout="vertical"
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" />
+                      <YAxis dataKey="name" type="category" width={120} />
+                      <Tooltip />
+                      <Bar dataKey="value" fill="#8b5cf6" name="Creators Approached" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             )}
           </div>
         </div>
       )}
 
-
+      {/* Scroll to Top/Bottom Buttons */}
+      {showScrollToTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-24 right-6 z-50 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 hover:scale-110 flex items-center justify-center"
+          aria-label="Scroll to top"
+        >
+          <ChevronUp className="w-6 h-6" />
+        </button>
+      )}
+      {showScrollToBottom && (
+        <button
+          onClick={scrollToBottom}
+          className="fixed bottom-6 right-6 z-50 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 hover:scale-110 flex items-center justify-center"
+          aria-label="Scroll to bottom"
+        >
+          <ChevronDown className="w-6 h-6" />
+        </button>
+      )}
     </div>
   );
 }

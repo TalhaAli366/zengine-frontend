@@ -2,6 +2,41 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 
+// Disable caching for this route to ensure fresh data on every request
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+// Helper function to fetch all records in batches (handles Supabase 1000 row limit)
+async function fetchAllInBatches<T>(
+  supabase: any,
+  table: string,
+  select: string,
+  filters: (query: any) => any,
+  batchSize: number = 1000
+): Promise<T[]> {
+  let allData: T[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let batchQuery = supabase.from(table).select(select);
+    batchQuery = filters(batchQuery);
+    const { data: batchData, error: batchError } = await batchQuery.range(offset, offset + batchSize - 1);
+
+    if (batchError) throw batchError;
+
+    if (batchData && batchData.length > 0) {
+      allData = allData.concat(batchData);
+      offset += batchSize;
+      hasMore = batchData.length === batchSize;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createServerComponentClient({ cookies });
@@ -27,93 +62,361 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     
     // If filtering by campaign, hashtag, or sound, first get influencer IDs
+    // CRITICAL: Fetch ALL matching IDs in batches (Supabase default limit is 1000)
     let influencerIds: string[] | null = null;
     
     if (campaignId) {
-      const { data: campaignLinks, error: linkError } = await supabase
-        .from('campaign_influencers')
-        .select('influencer_id')
-        .eq('campaign_id', campaignId);
-      
-      if (linkError) throw linkError;
-      influencerIds = campaignLinks?.map(link => link.influencer_id) || [];
-      
-      // If no influencers in campaign, return empty array
-      if (influencerIds.length === 0) {
-        return Response.json({
-          data: [],
-          total: 0,
-          page: page,
-          limit: limit,
-          totalPages: 0
-        });
+      console.log(`[INFLUENCERS API] Fetching campaign influencers for campaign: ${campaignId}`);
+      try {
+        const campaignLinks = await fetchAllInBatches(
+          supabase,
+          'campaign_influencers',
+          'influencer_id',
+          (query) => query.eq('campaign_id', campaignId)
+        );
+        
+        influencerIds = campaignLinks
+          .map((link: any) => link.influencer_id)
+          .filter((id: any) => id != null && id !== undefined && id !== '');
+        console.log(`[INFLUENCERS API] Found ${influencerIds.length} influencers in campaign (after filtering nulls)`);
+        
+        // If no influencers in campaign, return empty array
+        if (influencerIds.length === 0) {
+          return Response.json({
+            data: [],
+            total: 0,
+            page: page,
+            limit: limit,
+            totalPages: 0
+          });
+        }
+      } catch (err: any) {
+        console.error(`[INFLUENCERS API] Error fetching campaign influencers:`, err);
+        throw new Error(`Failed to fetch campaign influencers: ${err.message || 'Unknown error'}`);
       }
     }
     
     // Filter by hashtag
     if (hashtagId) {
-      const { data: hashtagLinks, error: hashtagError } = await supabase
-        .from('influencer_hashtags')
-        .select('influencer_id')
-        .eq('hashtag_id', parseInt(hashtagId));
-      
-      if (hashtagError) throw hashtagError;
-      const hashtagInfluencerIds = hashtagLinks?.map(link => link.influencer_id) || [];
-      
-      if (influencerIds) {
-        // Intersect with existing filter
-        influencerIds = influencerIds.filter(id => hashtagInfluencerIds.includes(id));
-      } else {
-        influencerIds = hashtagInfluencerIds;
-      }
-      
-      if (influencerIds.length === 0) {
-        return Response.json({
-          data: [],
-          total: 0,
-          page: page,
-          limit: limit,
-          totalPages: 0
-        });
+      console.log(`[INFLUENCERS API] Fetching hashtag influencers for hashtag: ${hashtagId}`);
+      try {
+        const hashtagLinks = await fetchAllInBatches(
+          supabase,
+          'influencer_hashtags',
+          'influencer_id',
+          (query) => query.eq('hashtag_id', parseInt(hashtagId))
+        );
+        
+        const hashtagInfluencerIds = hashtagLinks
+          .map((link: any) => link.influencer_id)
+          .filter((id: any) => id != null && id !== undefined && id !== '');
+        console.log(`[INFLUENCERS API] Found ${hashtagInfluencerIds.length} influencers with hashtag`);
+        
+        if (influencerIds) {
+          // Intersect with existing filter
+          const beforeCount = influencerIds.length;
+          influencerIds = influencerIds.filter(id => hashtagInfluencerIds.includes(id));
+          console.log(`[INFLUENCERS API] After intersection: ${influencerIds.length} (was ${beforeCount})`);
+        } else {
+          influencerIds = hashtagInfluencerIds;
+        }
+        
+        if (influencerIds.length === 0) {
+          return Response.json({
+            data: [],
+            total: 0,
+            page: page,
+            limit: limit,
+            totalPages: 0
+          });
+        }
+      } catch (err: any) {
+        console.error(`[INFLUENCERS API] Error fetching hashtag influencers:`, err);
+        throw new Error(`Failed to fetch hashtag influencers: ${err.message || 'Unknown error'}`);
       }
     }
     
     // Filter by sound
     if (soundId) {
-      const { data: soundLinks, error: soundError } = await supabase
-        .from('influencer_sounds')
-        .select('influencer_id')
-        .eq('sound_id', parseInt(soundId));
-      
-      if (soundError) throw soundError;
-      const soundInfluencerIds = soundLinks?.map(link => link.influencer_id) || [];
-      
-      if (influencerIds) {
-        // Intersect with existing filter
-        influencerIds = influencerIds.filter(id => soundInfluencerIds.includes(id));
-      } else {
-        influencerIds = soundInfluencerIds;
-      }
-      
-      if (influencerIds.length === 0) {
-        return Response.json({
-          data: [],
-          total: 0,
-          page: page,
-          limit: limit,
-          totalPages: 0
-        });
+      console.log(`[INFLUENCERS API] Fetching sound influencers for sound: ${soundId}`);
+      try {
+        const soundLinks = await fetchAllInBatches(
+          supabase,
+          'influencer_sounds',
+          'influencer_id',
+          (query) => query.eq('sound_id', parseInt(soundId))
+        );
+        
+        const soundInfluencerIds = soundLinks
+          .map((link: any) => link.influencer_id)
+          .filter((id: any) => id != null && id !== undefined && id !== '');
+        console.log(`[INFLUENCERS API] Found ${soundInfluencerIds.length} influencers with sound`);
+        
+        if (influencerIds) {
+          // Intersect with existing filter
+          const beforeCount = influencerIds.length;
+          influencerIds = influencerIds.filter(id => soundInfluencerIds.includes(id));
+          console.log(`[INFLUENCERS API] After intersection: ${influencerIds.length} (was ${beforeCount})`);
+        } else {
+          influencerIds = soundInfluencerIds;
+        }
+        
+        if (influencerIds.length === 0) {
+          return Response.json({
+            data: [],
+            total: 0,
+            page: page,
+            limit: limit,
+            totalPages: 0
+          });
+        }
+      } catch (err: any) {
+        console.error(`[INFLUENCERS API] Error fetching sound influencers:`, err);
+        throw new Error(`Failed to fetch sound influencers: ${err.message || 'Unknown error'}`);
       }
     }
     
     // Build query for influencers
-    let query = supabase
-      .from('influencers')
-      .select('*');
+    // CRITICAL: Supabase .in() has a limit of 1000 items - split into chunks if needed
+    const chunkSize = 1000;
+    let query: any;
     
-    // Filter by campaign influencer IDs if needed
+    // If we have influencer IDs and they're > 1000, we need to fetch in batches
+    if (influencerIds && influencerIds.length > chunkSize) {
+      console.log(`[INFLUENCERS API] ${influencerIds.length} matching influencers (exceeds ${chunkSize} limit), fetching in batches`);
+      
+      // Split influencer IDs into chunks
+      const idChunks: string[][] = [];
+      for (let i = 0; i < influencerIds.length; i += chunkSize) {
+        idChunks.push(influencerIds.slice(i, i + chunkSize));
+      }
+      
+      // Fetch influencers for each chunk
+      let allMatchingInfluencers: any[] = [];
+      let totalCount = 0;
+      
+      for (const chunk of idChunks) {
+        let chunkQuery = supabase
+          .from('influencers')
+          .select('*', { count: 'exact' })
+          .in('id', chunk);
+        
+        // Apply all other filters to each chunk
+        if (searchQuery) {
+          chunkQuery = chunkQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
+        }
+        if (minFollowers) {
+          chunkQuery = chunkQuery.gte('followers', parseInt(minFollowers));
+        }
+        if (maxFollowers) {
+          chunkQuery = chunkQuery.lte('followers', parseInt(maxFollowers));
+        }
+        if (minEngagementRate) {
+          chunkQuery = chunkQuery.gte('engagement_rate', parseFloat(minEngagementRate));
+        }
+        if (maxEngagementRate) {
+          chunkQuery = chunkQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
+        }
+        if (minAvgViews) {
+          chunkQuery = chunkQuery.gte('avg_views', parseFloat(minAvgViews));
+        }
+        if (maxAvgViews) {
+          chunkQuery = chunkQuery.lte('avg_views', parseFloat(maxAvgViews));
+        }
+        if (reachedOut === 'true') {
+          chunkQuery = chunkQuery.eq('has_outreach', true);
+        } else if (reachedOut === 'false') {
+          chunkQuery = chunkQuery.eq('has_outreach', false);
+        }
+        if (hasEmail === 'true') {
+          chunkQuery = chunkQuery.not('email', 'is', null).not('email', 'eq', '');
+        }
+        
+        // Fetch all records from this chunk (no pagination yet)
+        let chunkData: any[] = [];
+        let chunkOffset = 0;
+        const chunkBatchSize = 1000;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const { data: batchData, error: batchError, count: batchCount } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
+          if (batchError) throw batchError;
+          
+          if (chunkOffset === 0 && batchCount !== null) {
+            totalCount += batchCount;
+          }
+          
+          if (batchData && batchData.length > 0) {
+            chunkData = chunkData.concat(batchData);
+            chunkOffset += chunkBatchSize;
+            hasMore = batchData.length === chunkBatchSize;
+          } else {
+            hasMore = false;
+          }
+        }
+        
+        allMatchingInfluencers = allMatchingInfluencers.concat(chunkData);
+        console.log(`[INFLUENCERS API BATCH] Fetched ${chunkData.length} influencers from chunk (${chunk.length} IDs), total so far: ${allMatchingInfluencers.length}`);
+      }
+      
+      console.log(`[INFLUENCERS API] Total matching influencers fetched: ${allMatchingInfluencers.length}, total count: ${totalCount}`);
+      
+      // Sort all data by last_scraped
+      allMatchingInfluencers.sort((a, b) => {
+        const aDate = a.last_scraped ? new Date(a.last_scraped).getTime() : 0;
+        const bDate = b.last_scraped ? new Date(b.last_scraped).getTime() : 0;
+        return bDate - aDate; // Descending
+      });
+      
+      // Apply pagination
+      const paginatedData = allMatchingInfluencers.slice(offset, offset + limit);
+      
+      // Fetch campaign associations and orders for paginated data only
+      const paginatedIds = paginatedData.map(inf => inf.id);
+      const { campaignMap, orderMap } = await fetchAssociations(supabase, paginatedIds);
+      
+      // Transform data
+      const transformedData = paginatedData.map((inf: any) => ({
+        ...inf,
+        reference_order: orderMap[inf.id] || null,
+        campaigns: campaignMap[inf.id] || [],
+        campaign_count: (campaignMap[inf.id] || []).length
+      }));
+      
+      return Response.json({
+        data: transformedData,
+        total: totalCount || allMatchingInfluencers.length,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil((totalCount || allMatchingInfluencers.length) / limit)
+      });
+    }
+    
+    // Build normal query (either no influencer IDs, or <= 1000 influencer IDs)
+    // Note: Even with < 1000 IDs, we might hit URL length limits, so use batching for > 100 IDs
     if (influencerIds && influencerIds.length > 0) {
-      query = query.in('id', influencerIds);
+      if (influencerIds.length > 100) {
+        // Use batching even for < 1000 IDs to avoid URL length issues
+        console.log(`[INFLUENCERS API] ${influencerIds.length} influencer IDs - using batching to avoid URL length limits`);
+        
+        // Split into chunks of 100
+        const idChunks: string[][] = [];
+        for (let i = 0; i < influencerIds.length; i += 100) {
+          idChunks.push(influencerIds.slice(i, i + 100));
+        }
+        
+        // Fetch influencers for each chunk
+        let allMatchingInfluencers: any[] = [];
+        let totalCount = 0;
+        
+        for (const chunk of idChunks) {
+          let chunkQuery = supabase
+            .from('influencers')
+            .select('*', { count: 'exact' })
+            .in('id', chunk);
+          
+          // Apply all other filters to each chunk
+          if (searchQuery) {
+            chunkQuery = chunkQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
+          }
+          if (minFollowers) {
+            chunkQuery = chunkQuery.gte('followers', parseInt(minFollowers));
+          }
+          if (maxFollowers) {
+            chunkQuery = chunkQuery.lte('followers', parseInt(maxFollowers));
+          }
+          if (minEngagementRate) {
+            chunkQuery = chunkQuery.gte('engagement_rate', parseFloat(minEngagementRate));
+          }
+          if (maxEngagementRate) {
+            chunkQuery = chunkQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
+          }
+          if (minAvgViews) {
+            chunkQuery = chunkQuery.gte('avg_views', parseFloat(minAvgViews));
+          }
+          if (maxAvgViews) {
+            chunkQuery = chunkQuery.lte('avg_views', parseFloat(maxAvgViews));
+          }
+          if (reachedOut === 'true') {
+            chunkQuery = chunkQuery.eq('has_outreach', true);
+          } else if (reachedOut === 'false') {
+            chunkQuery = chunkQuery.eq('has_outreach', false);
+          }
+          if (hasEmail === 'true') {
+            chunkQuery = chunkQuery.not('email', 'is', null).not('email', 'eq', '');
+          }
+          
+          // Fetch all records from this chunk
+          let chunkData: any[] = [];
+          let chunkOffset = 0;
+          const chunkBatchSize = 1000;
+          let hasMore = true;
+          
+          while (hasMore) {
+            const { data: batchData, error: batchError, count: batchCount } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
+            if (batchError) throw batchError;
+            
+            if (chunkOffset === 0 && batchCount !== null) {
+              totalCount += batchCount;
+            }
+            
+            if (batchData && batchData.length > 0) {
+              chunkData = chunkData.concat(batchData);
+              chunkOffset += chunkBatchSize;
+              hasMore = batchData.length === chunkBatchSize;
+            } else {
+              hasMore = false;
+            }
+          }
+          
+          allMatchingInfluencers = allMatchingInfluencers.concat(chunkData);
+          console.log(`[INFLUENCERS API BATCH] Fetched ${chunkData.length} influencers from chunk (${chunk.length} IDs), total so far: ${allMatchingInfluencers.length}`);
+        }
+        
+        console.log(`[INFLUENCERS API] Total matching influencers fetched: ${allMatchingInfluencers.length}, total count: ${totalCount}`);
+        
+        // Sort all data by last_scraped
+        allMatchingInfluencers.sort((a, b) => {
+          const aDate = a.last_scraped ? new Date(a.last_scraped).getTime() : 0;
+          const bDate = b.last_scraped ? new Date(b.last_scraped).getTime() : 0;
+          return bDate - aDate; // Descending
+        });
+        
+        // Apply pagination
+        const paginatedData = allMatchingInfluencers.slice(offset, offset + limit);
+        
+        // Fetch campaign associations and orders for paginated data only
+        const paginatedIds = paginatedData.map(inf => inf.id);
+        const { campaignMap, orderMap } = await fetchAssociations(supabase, paginatedIds);
+        
+        // Transform data
+        const transformedData = paginatedData.map((inf: any) => ({
+          ...inf,
+          reference_order: orderMap[inf.id] || null,
+          campaigns: campaignMap[inf.id] || [],
+          campaign_count: (campaignMap[inf.id] || []).length
+        }));
+        
+        return Response.json({
+          data: transformedData,
+          total: totalCount || allMatchingInfluencers.length,
+          page: page,
+          limit: limit,
+          totalPages: Math.ceil((totalCount || allMatchingInfluencers.length) / limit)
+        });
+      } else {
+        // <= 100 IDs, use simple .in() query
+        console.log(`[INFLUENCERS API] Using simple path with ${influencerIds.length} influencer IDs`);
+        query = supabase
+          .from('influencers')
+          .select('*', { count: 'exact' })
+          .in('id', influencerIds);
+      }
+    } else {
+      console.log(`[INFLUENCERS API] Building query without influencer ID filter`);
+      query = supabase
+        .from('influencers')
+        .select('*', { count: 'exact' });
     }
     
     // Apply search filter
@@ -163,114 +466,89 @@ export async function GET(request: NextRequest) {
     query = query.order('last_scraped', { ascending: false });
     
     // Get total count with same filters (before pagination)
-    const countQuery = supabase
+    let countQuery = supabase
       .from('influencers')
       .select('*', { count: 'exact', head: true });
     
     // Apply same filters to count query
-    if (influencerIds && influencerIds.length > 0) {
-      countQuery.in('id', influencerIds);
+    if (influencerIds && influencerIds.length > 0 && influencerIds.length <= chunkSize) {
+      countQuery = countQuery.in('id', influencerIds);
     }
     if (searchQuery) {
-      countQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
+      countQuery = countQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
     }
     if (minFollowers) {
-      countQuery.gte('followers', parseInt(minFollowers));
+      countQuery = countQuery.gte('followers', parseInt(minFollowers));
     }
     if (maxFollowers) {
-      countQuery.lte('followers', parseInt(maxFollowers));
+      countQuery = countQuery.lte('followers', parseInt(maxFollowers));
     }
     if (minEngagementRate) {
-      countQuery.gte('engagement_rate', parseFloat(minEngagementRate));
+      countQuery = countQuery.gte('engagement_rate', parseFloat(minEngagementRate));
     }
     if (maxEngagementRate) {
-      countQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
+      countQuery = countQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
     }
     if (minAvgViews) {
-      countQuery.gte('avg_views', parseFloat(minAvgViews));
+      countQuery = countQuery.gte('avg_views', parseFloat(minAvgViews));
     }
     if (maxAvgViews) {
-      countQuery.lte('avg_views', parseFloat(maxAvgViews));
+      countQuery = countQuery.lte('avg_views', parseFloat(maxAvgViews));
     }
     if (reachedOut === 'true') {
-      countQuery.eq('has_outreach', true);
+      countQuery = countQuery.eq('has_outreach', true);
     } else if (reachedOut === 'false') {
-      countQuery.eq('has_outreach', false);
+      countQuery = countQuery.eq('has_outreach', false);
     }
     if (hasEmail === 'true') {
-      countQuery.not('email', 'is', null).not('email', 'eq', '');
+      countQuery = countQuery.not('email', 'is', null).not('email', 'eq', '');
     }
     
-    const { count } = await countQuery;
+    let count = 0;
+    try {
+      const countResult = await countQuery;
+      count = countResult.count || 0;
+      console.log(`[INFLUENCERS API] Count query result: ${count}`);
+    } catch (countError: any) {
+      console.error(`[INFLUENCERS API] Count query error:`, countError);
+      // Continue with main query, we'll use the count from the main query if available
+    }
     
     // Apply pagination to main query
     query = query.range(offset, offset + limit - 1);
     
-    const { data: influencers, error } = await query;
+    console.log(`[INFLUENCERS API] Executing main query with offset: ${offset}, limit: ${limit}`);
+    let influencers: any[] = [];
+    let queryError: any = null;
     
-    if (error) {
-      console.error('Supabase error:', error);
-      throw error;
-    }
-    
-    // Now fetch campaign associations for all influencers
-    const allInfluencerIds = (influencers || []).map(inf => inf.id);
-    let campaignMap: Record<string, string[]> = {};
-    let orderMap: Record<string, any> = {};
-    
-    if (allInfluencerIds.length > 0) {
-      // Fetch campaign links
-      const { data: campaignLinks, error: linkError } = await supabase
-        .from('campaign_influencers')
-        .select('influencer_id, campaign_id')
-        .in('influencer_id', allInfluencerIds);
+    try {
+      const result = await query;
+      influencers = result.data || [];
+      queryError = result.error;
       
-      if (!linkError && campaignLinks && campaignLinks.length > 0) {
-        // Get unique campaign IDs
-        const campaignIds = [...new Set(campaignLinks.map(link => link.campaign_id))];
-        
-        // Fetch campaign names
-        const { data: campaigns, error: campaignError } = await supabase
-          .from('campaigns')
-          .select('id, name')
-          .in('id', campaignIds);
-        
-        if (!campaignError && campaigns) {
-          // Build campaign ID -> name map
-          const campaignNameMap: Record<string, string> = {};
-          campaigns.forEach(camp => {
-            campaignNameMap[camp.id] = camp.name;
-          });
-          
-          // Build influencer_id -> campaign names map
-          campaignLinks.forEach((link: any) => {
-            const infId = link.influencer_id;
-            const campaignName = campaignNameMap[link.campaign_id];
-            if (campaignName) {
-              if (!campaignMap[infId]) {
-                campaignMap[infId] = [];
-              }
-              if (!campaignMap[infId].includes(campaignName)) {
-                campaignMap[infId].push(campaignName);
-              }
-            }
-          });
-        }
+      // If we got data but no count from count query, use the count from main query
+      if (count === 0 && result.count !== null && result.count !== undefined) {
+        count = result.count;
+        console.log(`[INFLUENCERS API] Using count from main query: ${count}`);
       }
-
-      const { data: orderRows, error: orderError } = await supabase
-        .from('reference_order_overview')
-        .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
-        .in('influencer_id', allInfluencerIds);
-
-      if (!orderError && orderRows) {
-        orderRows.forEach((row: any) => {
-          if (row.influencer_id) {
-            orderMap[row.influencer_id] = row;
-          }
-        });
-      }
+    } catch (err: any) {
+      console.error(`[INFLUENCERS API] Main query execution error:`, err);
+      queryError = err;
     }
+    
+    if (queryError) {
+      console.error(`[INFLUENCERS API] Supabase error details:`, {
+        message: queryError.message,
+        details: queryError.details,
+        hint: queryError.hint,
+        code: queryError.code
+      });
+      throw queryError;
+    }
+    
+    // Fetch campaign associations and orders for paginated influencers only
+    const allInfluencerIds = (influencers || []).map(inf => inf.id);
+    const { campaignMap, orderMap } = await fetchAssociations(supabase, allInfluencerIds);
     
     // Transform data to include campaign names
     const transformedData = (influencers || []).map((inf: any) => ({
@@ -292,6 +570,129 @@ export async function GET(request: NextRequest) {
     console.error('API error:', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
+}
+
+// Helper function to fetch campaign associations and orders (with batching for >1000 IDs)
+async function fetchAssociations(supabase: any, influencerIds: string[]) {
+  let campaignMap: Record<string, string[]> = {};
+  let orderMap: Record<string, any> = {};
+  
+  if (influencerIds.length === 0) {
+    return { campaignMap, orderMap };
+  }
+  
+  const chunkSize = 1000;
+  
+  // Fetch campaign links in batches if needed
+  if (influencerIds.length <= chunkSize) {
+    // Simple case: <= 1000 influencers
+    const { data: campaignLinks, error: linkError } = await supabase
+      .from('campaign_influencers')
+      .select('influencer_id, campaign_id')
+      .in('influencer_id', influencerIds);
+    
+    if (!linkError && campaignLinks && campaignLinks.length > 0) {
+      const campaignIds = [...new Set(campaignLinks.map((link: any) => link.campaign_id))];
+      
+      const { data: campaigns, error: campaignError } = await supabase
+        .from('campaigns')
+        .select('id, name')
+        .in('id', campaignIds);
+      
+      if (!campaignError && campaigns) {
+        const campaignNameMap: Record<string, string> = {};
+        campaigns.forEach((camp: any) => {
+          campaignNameMap[camp.id] = camp.name;
+        });
+        
+        campaignLinks.forEach((link: any) => {
+          const infId = link.influencer_id;
+          const campaignName = campaignNameMap[link.campaign_id];
+          if (campaignName) {
+            if (!campaignMap[infId]) {
+              campaignMap[infId] = [];
+            }
+            if (!campaignMap[infId].includes(campaignName)) {
+              campaignMap[infId].push(campaignName);
+            }
+          }
+        });
+      }
+    }
+    
+    // Fetch orders
+    const { data: orderRows, error: orderError } = await supabase
+      .from('reference_order_overview')
+      .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
+      .in('influencer_id', influencerIds);
+    
+    if (!orderError && orderRows) {
+      orderRows.forEach((row: any) => {
+        if (row.influencer_id) {
+          orderMap[row.influencer_id] = row;
+        }
+      });
+    }
+  } else {
+    // Complex case: > 1000 influencers, fetch in batches
+    const idChunks: string[][] = [];
+    for (let i = 0; i < influencerIds.length; i += chunkSize) {
+      idChunks.push(influencerIds.slice(i, i + chunkSize));
+    }
+    
+    for (const chunk of idChunks) {
+      // Fetch campaign links for this chunk
+      const { data: campaignLinks, error: linkError } = await supabase
+        .from('campaign_influencers')
+        .select('influencer_id, campaign_id')
+        .in('influencer_id', chunk);
+      
+      if (!linkError && campaignLinks && campaignLinks.length > 0) {
+        const campaignIds = [...new Set(campaignLinks.map((link: any) => link.campaign_id))];
+        
+        const { data: campaigns, error: campaignError } = await supabase
+          .from('campaigns')
+          .select('id, name')
+          .in('id', campaignIds);
+        
+        if (!campaignError && campaigns) {
+          const campaignNameMap: Record<string, string> = {};
+          campaigns.forEach((camp: any) => {
+            campaignNameMap[camp.id] = camp.name;
+          });
+          
+          campaignLinks.forEach((link: any) => {
+            const infId = link.influencer_id;
+            const campaignName = campaignNameMap[link.campaign_id];
+            if (campaignName) {
+              if (!campaignMap[infId]) {
+                campaignMap[infId] = [];
+              }
+              if (!campaignMap[infId].includes(campaignName)) {
+                campaignMap[infId].push(campaignName);
+              }
+            }
+          });
+        }
+      }
+      
+      // Fetch orders for this chunk
+      const { data: orderRows, error: orderError } = await supabase
+        .from('reference_order_overview')
+        .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
+        .in('influencer_id', chunk);
+      
+      if (!orderError && orderRows) {
+        orderRows.forEach((row: any) => {
+          if (row.influencer_id) {
+            orderMap[row.influencer_id] = row;
+          }
+        });
+      }
+    }
+  }
+  
+  return { campaignMap, orderMap };
 }
 
 export async function DELETE(request: NextRequest) {

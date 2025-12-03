@@ -169,7 +169,8 @@ export default function OutreachPage() {
       if (Array.isArray(parsed) && parsed.length > 0) {
         let removedMissingEmail = 0;
         const sanitized = parsed.filter((inf: Influencer) => {
-          const valid = inf && inf.id;
+          // Allow orders with temporary ids (starting with "order-") or regular influencer ids
+          const valid = inf && (inf.id || inf.email);
           if (!valid) return false;
           if (!inf.email) {
             removedMissingEmail += 1;
@@ -199,7 +200,14 @@ export default function OutreachPage() {
         }
 
         setInfluencers(sanitized);
-        setSelectedInfluencers(sanitized.map((inf: Influencer) => inf.id));
+        // Handle both regular influencer ids and temporary order ids
+        // Ensure all influencers have a valid id for selection tracking
+        const idsWithFallback = sanitized.map((inf: Influencer) => {
+          if (inf.id) return inf.id;
+          // Generate a stable id from email if id is missing (for orders)
+          return `order-${inf.email}`;
+        });
+        setSelectedInfluencers(idsWithFallback);
         setSelectionMode(true);
         if (showMessage) {
           setMessage({
@@ -354,7 +362,8 @@ export default function OutreachPage() {
     if (selectedInfluencers.length === influencers.length) {
       setSelectedInfluencers([]);
     } else {
-      setSelectedInfluencers(influencers.map(inf => inf.id));
+      // Handle both regular influencer ids and temporary order ids
+      setSelectedInfluencers(influencers.map(inf => inf.id || `order-${inf.email}`));
     }
   };
 
@@ -617,15 +626,18 @@ export default function OutreachPage() {
                       </div>
                     ) : (
                       <div className="divide-y divide-gray-200">
-                        {influencers.map(influencer => (
+                        {influencers.map(influencer => {
+                          // Ensure we have a valid id for key and selection (handle orders with temporary ids)
+                          const influencerId = influencer.id || `order-${influencer.email}`;
+                          return (
                           <label
-                            key={influencer.id}
+                            key={influencerId}
                             className="flex items-center p-4 hover:bg-gray-50 cursor-pointer"
                           >
                             <input
                               type="checkbox"
-                              checked={selectedInfluencers.includes(influencer.id)}
-                              onChange={() => toggleInfluencerSelection(influencer.id)}
+                              checked={selectedInfluencers.includes(influencerId)}
+                              onChange={() => toggleInfluencerSelection(influencerId)}
                               className="mr-3 h-4 w-4 text-blue-600"
                             />
                             <div className="flex-1">
@@ -638,7 +650,8 @@ export default function OutreachPage() {
                               {influencer.followers ? influencer.followers.toLocaleString() : 'N/A'} followers
                             </span>
                           </label>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

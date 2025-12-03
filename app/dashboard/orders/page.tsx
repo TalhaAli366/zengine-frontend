@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video, StopCircle, Download } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Upload, Filter, Search, Loader2, CheckCircle2, AlertCircle, DollarSign, Users, CalendarDays, RefreshCw, Plus, X, Trash2, Music, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, ExternalLink, Video, StopCircle, Download, ChevronUp, ChevronDown, Mail } from 'lucide-react';
 import { importReferenceOrders, ReferenceImportResult, exportReferenceOrders } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -151,7 +152,18 @@ interface SongAnalyticsResponse {
   cached?: boolean;
 }
 
+interface OutreachSelectionInfluencer {
+  id: string;
+  username: string;
+  display_name?: string;
+  email?: string;
+  followers?: number;
+  country?: string;
+  engagement_rate?: number;
+}
+
 export default function ReferenceOrdersPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'orders' | 'songs'>('orders');
   const [orders, setOrders] = useState<ReferenceOrderRow[]>([]);
   const [ownerStats, setOwnerStats] = useState<OwnerStat[]>([]);
@@ -173,6 +185,8 @@ export default function ReferenceOrdersPage() {
   const [refreshingSongs, setRefreshingSongs] = useState(false);
   const [totalRecords, setTotalRecords] = useState(0);
   const [selectedCreators, setSelectedCreators] = useState<Record<string, { display: string; handle: string }>>({});
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [selectedOrderDetails, setSelectedOrderDetails] = useState<Record<string, ReferenceOrderRow>>({});
   const [avgViewJobs, setAvgViewJobs] = useState<AvgViewJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true); // Start as true to disable buttons during initial load
   const [avgViewProcessing, setAvgViewProcessing] = useState(false);
@@ -187,6 +201,7 @@ export default function ReferenceOrdersPage() {
   const [syncingSheet, setSyncingSheet] = useState(false);
   const [lastSheetSyncAt, setLastSheetSyncAt] = useState<string | null>(null);
 
+  // Pending filters (what user is typing)
   const [search, setSearch] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [approvedFilter, setApprovedFilter] = useState('');
@@ -197,6 +212,19 @@ export default function ReferenceOrdersPage() {
   const [minAvgViews, setMinAvgViews] = useState('');
   const [maxAvgViews, setMaxAvgViews] = useState('');
   const [uniqueCreators, setUniqueCreators] = useState(false);
+  
+  // Applied filters (what's actually being used for queries)
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [appliedOwnerFilter, setAppliedOwnerFilter] = useState('');
+  const [appliedApprovedFilter, setAppliedApprovedFilter] = useState('');
+  const [appliedPaidFilter, setAppliedPaidFilter] = useState('');
+  const [appliedMatchedFilter, setAppliedMatchedFilter] = useState('');
+  const [appliedDateFrom, setAppliedDateFrom] = useState('');
+  const [appliedDateTo, setAppliedDateTo] = useState('');
+  const [appliedMinAvgViews, setAppliedMinAvgViews] = useState('');
+  const [appliedMaxAvgViews, setAppliedMaxAvgViews] = useState('');
+  const [appliedUniqueCreators, setAppliedUniqueCreators] = useState(false);
+  
   const [sortBy, setSortBy] = useState('date_paid');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -209,6 +237,7 @@ export default function ReferenceOrdersPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ReferenceImportResult | null>(null);
   const [exporting, setExporting] = useState<'csv' | 'excel' | null>(null);
+  const [sendingToOutreach, setSendingToOutreach] = useState(false);
   const filteredSongs = useMemo(() => {
     const term = songSearch.trim().toLowerCase();
     if (!term) return songAnalytics;
@@ -230,6 +259,8 @@ export default function ReferenceOrdersPage() {
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [videoLinksModalOpen, setVideoLinksModalOpen] = useState(false);
   const [selectedVideoLinks, setSelectedVideoLinks] = useState<string>('');
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(true);
 
   const manualOrderDefaults = useMemo(
     () => ({
@@ -253,6 +284,19 @@ export default function ReferenceOrdersPage() {
   const [manualOrder, setManualOrder] = useState({ ...manualOrderDefaults });
   const [editForm, setEditForm] = useState({ ...manualOrderDefaults });
   const selectedCreatorCount = Object.keys(selectedCreators).length;
+
+  // Deduplicate orders by ID to prevent duplicate key warnings
+  const uniqueOrders = useMemo(() => {
+    const seen = new Set<string>();
+    return orders.filter((order) => {
+      if (seen.has(order.id)) {
+        console.warn(`Duplicate order detected: ${order.id}`);
+        return false;
+      }
+      seen.add(order.id);
+      return true;
+    });
+  }, [orders]);
 
   // Check if there's a running or pending job
   const hasRunningJob = useMemo(() => {
@@ -301,16 +345,16 @@ export default function ReferenceOrdersPage() {
         page: currentPage.toString(),
         limit: limit.toString(),
       });
-      if (search) params.append('search', search);
-      if (ownerFilter) params.append('owner', ownerFilter);
-      if (approvedFilter) params.append('approved', approvedFilter);
-      if (paidFilter) params.append('paid', paidFilter);
-      if (matchedFilter) params.append('matched', matchedFilter);
-      if (dateFrom) params.append('date_from', dateFrom);
-      if (dateTo) params.append('date_to', dateTo);
-      if (minAvgViews) params.append('min_avg_views', minAvgViews);
-      if (maxAvgViews) params.append('max_avg_views', maxAvgViews);
-      if (uniqueCreators) params.append('unique_creators', 'true');
+      if (appliedSearch) params.append('search', appliedSearch);
+      if (appliedOwnerFilter) params.append('owner', appliedOwnerFilter);
+      if (appliedApprovedFilter) params.append('approved', appliedApprovedFilter);
+      if (appliedPaidFilter) params.append('paid', appliedPaidFilter);
+      if (appliedMatchedFilter) params.append('matched', appliedMatchedFilter);
+      if (appliedDateFrom) params.append('date_from', appliedDateFrom);
+      if (appliedDateTo) params.append('date_to', appliedDateTo);
+      if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
+      if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
+      if (appliedUniqueCreators) params.append('unique_creators', 'true');
       if (sortBy) params.append('sort_by', sortBy);
       if (sortOrder) params.append('sort_order', sortOrder);
 
@@ -318,7 +362,19 @@ export default function ReferenceOrdersPage() {
       if (!response.ok) throw new Error('Failed to load reference orders');
       const data: ReferenceOrdersResponse = await response.json();
 
-      setOrders(data.data || []);
+      // Deduplicate orders by ID before setting state to prevent duplicate key warnings
+      const ordersData = data.data || [];
+      const seen = new Set<string>();
+      const uniqueOrdersData = ordersData.filter((order) => {
+        if (seen.has(order.id)) {
+          console.warn(`Duplicate order detected in API response: ${order.id}`);
+          return false;
+        }
+        seen.add(order.id);
+        return true;
+      });
+
+      setOrders(uniqueOrdersData);
       setOwnerStats(data.owners || []);
       setStats(data.stats);
       setTotalRecords(data.total || 0);
@@ -411,10 +467,52 @@ export default function ReferenceOrdersPage() {
     }
   };
 
+  // Apply filters function - copies pending filters to applied filters
+  const applyFilters = () => {
+    setAppliedSearch(search);
+    setAppliedOwnerFilter(ownerFilter);
+    setAppliedApprovedFilter(approvedFilter);
+    setAppliedPaidFilter(paidFilter);
+    setAppliedMatchedFilter(matchedFilter);
+    setAppliedDateFrom(dateFrom);
+    setAppliedDateTo(dateTo);
+    setAppliedMinAvgViews(minAvgViews);
+    setAppliedMaxAvgViews(maxAvgViews);
+    setAppliedUniqueCreators(uniqueCreators);
+    setCurrentPage(1);
+  };
+
   useEffect(() => {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, ownerFilter, approvedFilter, paidFilter, matchedFilter, dateFrom, dateTo, minAvgViews, maxAvgViews, uniqueCreators, sortBy, sortOrder, currentPage]);
+  }, [appliedSearch, appliedOwnerFilter, appliedApprovedFilter, appliedPaidFilter, appliedMatchedFilter, appliedDateFrom, appliedDateTo, appliedMinAvgViews, appliedMaxAvgViews, appliedUniqueCreators, sortBy, sortOrder, currentPage]);
+
+  // Scroll position detection for scroll buttons
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = document.documentElement.clientHeight;
+      const isAtTop = scrollTop < 100;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 100;
+
+      setShowScrollToTop(!isAtTop);
+      setShowScrollToBottom(!isAtBottom);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    handleScroll(); // Check initial position
+
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const scrollToBottom = () => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     loadSongAnalytics({ background: true });
@@ -598,6 +696,275 @@ export default function ReferenceOrdersPage() {
     setSelectedCreators({});
   };
 
+
+  const handleSendToOutreach = async () => {
+    console.log('handleSendToOutreach called');
+    console.log('selectedOrderIds:', Array.from(selectedOrderIds));
+    console.log('selectedOrderDetails:', Object.keys(selectedOrderDetails));
+    
+    if (selectedOrderIds.size === 0) {
+      setBanner({ type: 'error', message: 'Please select at least one order' });
+      return;
+    }
+
+    setSendingToOutreach(true);
+    try {
+      const selectedOrders = Array.from(selectedOrderIds)
+        .map(id => selectedOrderDetails[id] || orders.find(o => o.id === id))
+        .filter((o): o is ReferenceOrderRow => Boolean(o));
+      
+      console.log('Selected orders:', selectedOrders.length);
+      console.log('First order:', selectedOrders[0]);
+
+      // Fetch all influencers once
+      console.log('Fetching influencers...');
+      const fetchPromise = fetch(`/api/influencers`);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Fetch timeout after 10 seconds')), 10000)
+      );
+      
+      let response;
+      try {
+        response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
+        console.log('Response status:', response.status, response.ok);
+      } catch (fetchError: any) {
+        console.error('Fetch error:', fetchError);
+        throw new Error(`Failed to fetch influencers: ${fetchError.message || fetchError}`);
+      }
+      
+      if (!response.ok) {
+        console.error('Response not OK:', response.status, response.statusText);
+        throw new Error(`Failed to fetch influencers: ${response.status} ${response.statusText}`);
+      }
+      
+      console.log('Parsing JSON...');
+      const data = await response.json();
+      console.log('Fetched data:', data);
+      console.log('Fetched data type:', Array.isArray(data) ? 'array' : 'object');
+      console.log('Data keys:', Object.keys(data));
+      
+      // Handle different response formats
+      let allInfluencers: any[] = [];
+      if (Array.isArray(data)) {
+        allInfluencers = data;
+      } else if (data.influencers && Array.isArray(data.influencers)) {
+        allInfluencers = data.influencers;
+      } else if (data.data && Array.isArray(data.data)) {
+        allInfluencers = data.data;
+      } else {
+        console.warn('Unexpected data format:', data);
+      }
+      
+      console.log('All influencers count:', allInfluencers.length);
+      if (allInfluencers.length > 0) {
+        console.log('First influencer:', allInfluencers[0]);
+      }
+      
+      // Build payload directly from orders - no need to match influencers
+      console.log('Building payload from orders...');
+      
+      const payload = selectedOrders
+        .filter(order => order.email && order.username) // Only include orders with email and username
+        .map(order => {
+          // Try to find influencer if influencer_id exists (for additional data)
+          let influencer = null;
+          if (order.influencer_id) {
+            influencer = allInfluencers.find((inf: any) => inf.id === order.influencer_id);
+          }
+          
+          // Build payload from order data, use influencer data if available
+          // Generate a stable temporary id if no influencer_id exists (outreach page will handle it)
+          // Use email as fallback for id generation to ensure consistency
+          const orderId = influencer?.id || order.influencer_id || `order-${order.email || order.id}`;
+          const payloadItem: OutreachSelectionInfluencer = {
+            id: orderId, // Always ensure id is set (influencer id, order influencer_id, or temp id based on email)
+            username: influencer?.username || order.username.replace(/^@/, ''),
+            display_name: influencer?.display_name || order.username.replace(/^@/, ''),
+            email: influencer?.email || order.email,
+            followers: influencer?.followers,
+            country: influencer?.country,
+            engagement_rate: influencer?.engagement_rate,
+          };
+          
+          console.log('Built payload item:', payloadItem);
+          return payloadItem;
+        })
+        .filter((inf): inf is OutreachSelectionInfluencer => Boolean(inf && inf.email && inf.id));
+      
+      console.log('Final payload:', payload.length, 'items');
+
+      if (payload.length === 0) {
+        const ordersWithoutEmail = selectedOrders.filter(o => !o.email).length;
+        let message = 'Selected orders cannot be sent to outreach. ';
+        if (ordersWithoutEmail > 0) {
+          message += `${ordersWithoutEmail} order${ordersWithoutEmail !== 1 ? 's' : ''} ${ordersWithoutEmail !== 1 ? 'do' : 'does'} not have email addresses.`;
+        } else {
+          message += 'No orders with valid email addresses found.';
+        }
+        console.error('Payload is empty:', message);
+        setBanner({ 
+          type: 'error', 
+          message: message.trim()
+        });
+        setSendingToOutreach(false);
+        return;
+      }
+
+      // Merge with existing selection in localStorage instead of replacing
+      console.log('About to merge and store...');
+      if (typeof window !== 'undefined') {
+        // Load existing selection
+        const existingSelectionStr = window.localStorage.getItem('outreachSelection');
+        let existingSelection: OutreachSelectionInfluencer[] = [];
+        
+        if (existingSelectionStr) {
+          try {
+            const parsed = JSON.parse(existingSelectionStr);
+            if (Array.isArray(parsed)) {
+              existingSelection = parsed;
+              console.log('Found existing selection:', existingSelection.length, 'items');
+            }
+          } catch (e) {
+            console.warn('Failed to parse existing selection, starting fresh:', e);
+          }
+        }
+        
+        // Merge: deduplicate by email (most reliable identifier)
+        const existingEmails = new Set(existingSelection.map(inf => inf.email?.toLowerCase()).filter(Boolean));
+        const newItems = payload.filter(inf => {
+          const emailLower = inf.email?.toLowerCase();
+          return emailLower && !existingEmails.has(emailLower);
+        });
+        
+        const mergedSelection = [...existingSelection, ...newItems];
+        console.log(`Merged selection: ${existingSelection.length} existing + ${newItems.length} new = ${mergedSelection.length} total`);
+        
+        const payloadString = JSON.stringify(mergedSelection);
+        console.log('Payload string length:', payloadString.length);
+        window.localStorage.setItem('outreachSelection', payloadString);
+        console.log('✅ Stored merged outreach selection:', mergedSelection.length, 'influencers');
+        console.log('Payload preview:', mergedSelection.slice(0, 2));
+        
+        // Verify it was stored
+        const stored = window.localStorage.getItem('outreachSelection');
+        console.log('Verified storage:', stored ? 'SUCCESS' : 'FAILED');
+        
+        // Use window.location for more reliable navigation
+        console.log('Navigating to /dashboard/outreach?source=orders');
+        // Don't reset loading state here as we're navigating away
+        window.location.href = '/dashboard/outreach?source=orders';
+        console.log('Navigation command sent');
+      } else {
+        console.log('Using router.push (server-side)');
+        router.push('/dashboard/outreach?source=orders');
+      }
+    } catch (error) {
+      console.error('Failed to send to outreach:', error);
+      setBanner({ type: 'error', message: 'Failed to prepare outreach selection' });
+      setSendingToOutreach(false);
+    }
+  };
+
+  const toggleOrderSelection = (order: ReferenceOrderRow) => {
+    const normalized = normalizeHandle(order.normalized_username || order.username);
+    const isOrderSelected = selectedOrderIds.has(order.id);
+    
+    // Toggle order selection (for outreach)
+    setSelectedOrderIds(prev => {
+      const updated = new Set(prev);
+      if (updated.has(order.id)) {
+        updated.delete(order.id);
+        setSelectedOrderDetails(prevDetails => {
+          const { [order.id]: _, ...rest } = prevDetails;
+          return rest;
+        });
+      } else {
+        updated.add(order.id);
+        setSelectedOrderDetails(prevDetails => ({
+          ...prevDetails,
+          [order.id]: order,
+        }));
+      }
+      return updated;
+    });
+    
+    // Also toggle creator selection (for avg views) if normalized username exists
+    if (normalized) {
+      setSelectedCreators(prev => {
+        const updated = { ...prev };
+        if (isOrderSelected) {
+          delete updated[normalized];
+        } else {
+          const display = order.username || order.normalized_username || normalized;
+          updated[normalized] = {
+            display,
+            handle: display.replace(/^@/, '').trim() || normalized,
+          };
+        }
+        return updated;
+      });
+    }
+  };
+
+  const toggleSelectAllCurrentPageOrders = () => {
+    const pageOrderIds = orders.map(o => o.id);
+    const allSelected = pageOrderIds.every(id => selectedOrderIds.has(id));
+
+    if (allSelected) {
+      // Deselect all
+      setSelectedOrderIds(prev => {
+        const updated = new Set(prev);
+        pageOrderIds.forEach(id => updated.delete(id));
+        return updated;
+      });
+      setSelectedOrderDetails(prev => {
+        const updated = { ...prev };
+        pageOrderIds.forEach(id => delete updated[id]);
+        return updated;
+      });
+      // Also deselect creators
+      setSelectedCreators(prev => {
+        const updated = { ...prev };
+        orders.forEach(order => {
+          const normalized = normalizeHandle(order.normalized_username || order.username);
+          if (normalized && updated[normalized]) {
+            delete updated[normalized];
+          }
+        });
+        return updated;
+      });
+    } else {
+      // Select all
+      setSelectedOrderIds(prev => {
+        const updated = new Set(prev);
+        pageOrderIds.forEach(id => updated.add(id));
+        return updated;
+      });
+      setSelectedOrderDetails(prev => {
+        const updated = { ...prev };
+        orders.forEach(order => {
+          updated[order.id] = order;
+        });
+        return updated;
+      });
+      // Also select creators
+      setSelectedCreators(prev => {
+        const updated = { ...prev };
+        orders.forEach(order => {
+          const normalized = normalizeHandle(order.normalized_username || order.username);
+          if (normalized && !updated[normalized]) {
+            const display = order.username || order.normalized_username || normalized;
+            updated[normalized] = {
+              display,
+              handle: display.replace(/^@/, '').trim() || normalized,
+            };
+          }
+        });
+        return updated;
+      });
+    }
+  };
+
   const handleStartAvgViewJob = async (mode: 'manual' | 'all') => {
     if (mode === 'manual' && selectedCreatorCount === 0) {
       setBanner({ type: 'error', message: 'Select at least one creator first' });
@@ -607,8 +974,20 @@ export default function ReferenceOrdersPage() {
       setAvgViewProcessing(true);
       const payload =
         mode === 'manual'
-          ? { usernames: Object.values(selectedCreators).map((entry) => entry.handle), mode: 'manual' }
+          ? { 
+              usernames: Object.values(selectedCreators)
+                .map((entry) => entry.handle)
+                .filter((handle): handle is string => Boolean(handle && handle.trim())), // Filter out empty/invalid handles
+              mode: 'manual' 
+            }
           : { mode: 'all' };
+      
+      // Validate that we have valid usernames for manual mode
+      if (mode === 'manual' && (!payload.usernames || payload.usernames.length === 0)) {
+        setBanner({ type: 'error', message: 'No valid usernames found in selected orders. Please ensure orders have valid usernames.' });
+        setAvgViewProcessing(false);
+        return;
+      }
 
       const response = await fetch(`${API_URL}/api/v1/reference-orders/avg-views/jobs`, {
         method: 'POST',
@@ -675,6 +1054,17 @@ export default function ReferenceOrdersPage() {
     setMinAvgViews('');
     setMaxAvgViews('');
     setUniqueCreators(false);
+    // Also clear applied filters
+    setAppliedSearch('');
+    setAppliedOwnerFilter('');
+    setAppliedApprovedFilter('');
+    setAppliedPaidFilter('');
+    setAppliedMatchedFilter('');
+    setAppliedDateFrom('');
+    setAppliedDateTo('');
+    setAppliedMinAvgViews('');
+    setAppliedMaxAvgViews('');
+    setAppliedUniqueCreators(false);
     setCurrentPage(1);
   };
 
@@ -1225,6 +1615,13 @@ export default function ReferenceOrdersPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <button
+                    onClick={applyFilters}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+                  >
+                    <Filter className="w-4 h-4" />
+                    Apply Filters
+                  </button>
+                  <button
                     onClick={() => loadOrders()}
                     className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
                   >
@@ -1244,9 +1641,11 @@ export default function ReferenceOrdersPage() {
                     <input
                       type="text"
                       value={search}
-                      onChange={(e) => {
-                        setCurrentPage(1);
-                        setSearch(e.target.value);
+                      onChange={(e) => setSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          applyFilters();
+                        }
                       }}
                       placeholder="Username or link"
                       className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -1258,9 +1657,11 @@ export default function ReferenceOrdersPage() {
                   <input
                     type="text"
                     value={ownerFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setOwnerFilter(e.target.value);
+                    onChange={(e) => setOwnerFilter(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
                     placeholder="e.g. Ryan"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
@@ -1270,10 +1671,7 @@ export default function ReferenceOrdersPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Approved Vendor</label>
                   <select
                     value={approvedFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setApprovedFilter(e.target.value);
-                    }}
+                    onChange={(e) => setApprovedFilter(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All</option>
@@ -1285,10 +1683,7 @@ export default function ReferenceOrdersPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
                   <select
                     value={paidFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setPaidFilter(e.target.value);
-                    }}
+                    onChange={(e) => setPaidFilter(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All</option>
@@ -1300,10 +1695,7 @@ export default function ReferenceOrdersPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Matched to Scraper</label>
                   <select
                     value={matchedFilter}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setMatchedFilter(e.target.value);
-                    }}
+                    onChange={(e) => setMatchedFilter(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   >
                     <option value="">All creators</option>
@@ -1316,10 +1708,7 @@ export default function ReferenceOrdersPage() {
                   <input
                     type="date"
                     value={dateFrom}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setDateFrom(e.target.value);
-                    }}
+                    onChange={(e) => setDateFrom(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
@@ -1328,10 +1717,7 @@ export default function ReferenceOrdersPage() {
                   <input
                     type="date"
                     value={dateTo}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setDateTo(e.target.value);
-                    }}
+                    onChange={(e) => setDateTo(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
@@ -1340,11 +1726,12 @@ export default function ReferenceOrdersPage() {
                   <input
                     type="number"
                     value={minAvgViews}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setMinAvgViews(e.target.value);
+                    onChange={(e) => setMinAvgViews(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
-                    onBlur={() => loadOrders()}
                     placeholder="e.g. 1000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
@@ -1354,11 +1741,12 @@ export default function ReferenceOrdersPage() {
                   <input
                     type="number"
                     value={maxAvgViews}
-                    onChange={(e) => {
-                      setCurrentPage(1);
-                      setMaxAvgViews(e.target.value);
+                    onChange={(e) => setMaxAvgViews(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
                     }}
-                    onBlur={() => loadOrders()}
                     placeholder="e.g. 1000000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
@@ -1368,10 +1756,7 @@ export default function ReferenceOrdersPage() {
                     <input
                       type="checkbox"
                       checked={uniqueCreators}
-                      onChange={(e) => {
-                        setCurrentPage(1);
-                        setUniqueCreators(e.target.checked);
-                      }}
+                      onChange={(e) => setUniqueCreators(e.target.checked)}
                       className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                     />
                     <span className="text-sm font-medium text-gray-700">Show only unique creators</span>
@@ -1401,6 +1786,48 @@ export default function ReferenceOrdersPage() {
               )}
             </div>
 
+            {/* Outreach Selection Bar */}
+            {selectedOrderIds.size > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Mail className="w-5 h-5 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-900">
+                    {selectedOrderIds.size} order{selectedOrderIds.size !== 1 ? 's' : ''} selected for outreach
+                  </span>
+                  <button
+                    onClick={() => {
+                      setSelectedOrderIds(new Set());
+                      setSelectedOrderDetails({});
+                    }}
+                    className="text-sm text-blue-600 hover:text-blue-700 underline"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleSendToOutreach();
+                  }}
+                  disabled={sendingToOutreach}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {sendingToOutreach ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-4 h-4" />
+                      Send to Outreach
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* Orders Table */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               {loading ? (
@@ -1420,14 +1847,22 @@ export default function ReferenceOrdersPage() {
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Select</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 text-primary-600 border-gray-300 rounded"
+                              checked={orders.length > 0 && orders.every(o => selectedOrderIds.has(o.id))}
+                              onChange={toggleSelectAllCurrentPageOrders}
+                              title="Select all orders"
+                            />
+                          </th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Creator</th>
                           <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                             <button
                               onClick={() => toggleSort('owner_name')}
                               className="inline-flex items-center gap-1 hover:text-primary-600 transition-colors"
                             >
-                              Owner
+                              Approached By
                               {sortBy === 'owner_name' ? (
                                 sortOrder === 'asc' ? (
                                   <ArrowUp className="w-3 h-3" />
@@ -1483,9 +1918,10 @@ export default function ReferenceOrdersPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {orders.map((order) => {
+                        {uniqueOrders.map((order) => {
                           const normalized = normalizeHandle(order.normalized_username || order.username);
                           const isSelected = normalized ? Boolean(selectedCreators[normalized]) : false;
+                          const isOrderSelected = selectedOrderIds.has(order.id);
                           return (
                             <tr key={order.id} className="border-b border-gray-100 last:border-b-0">
                               <td className="px-4 py-4 text-sm">
@@ -1493,8 +1929,9 @@ export default function ReferenceOrdersPage() {
                                   <input
                                     type="checkbox"
                                     className="h-4 w-4 text-primary-600 border-gray-300 rounded"
-                                    checked={isSelected}
-                                    onChange={() => handleToggleCreatorSelection(order)}
+                                    checked={isOrderSelected}
+                                    onChange={() => toggleOrderSelection(order)}
+                                    title="Select order (for outreach and avg views)"
                                   />
                                 ) : (
                                   <span className="text-xs text-gray-400">N/A</span>
@@ -1513,7 +1950,18 @@ export default function ReferenceOrdersPage() {
                                   </span>
                                 )}
                               </td>
-                              <td className="px-6 py-4 text-sm text-gray-700">{order.owner_name || 'Unassigned'}</td>
+                              <td className="px-6 py-4 text-sm text-gray-700">
+                                <div className="flex items-center gap-2">
+                                  <span>{order.owner_name || 'Unassigned'}</span>
+                                  <button
+                                    onClick={() => openEditModal(order)}
+                                    className="text-blue-600 hover:text-blue-800 text-xs underline"
+                                    title="Edit approached by"
+                                  >
+                                    Edit
+                                  </button>
+                                </div>
+                              </td>
                               <td className="px-6 py-4 text-sm text-gray-700">
                                 <div className="flex items-center gap-2">
                                   <CalendarDays className="w-4 h-4 text-blue-500" />
@@ -2100,14 +2548,17 @@ export default function ReferenceOrdersPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Owner / Employee</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Approached By</label>
                   <input
                     type="text"
                     value={editForm.ownerName}
                     onChange={(e) => setEditForm((prev) => ({ ...prev, ownerName: e.target.value }))}
-                    placeholder="Ryan"
+                    placeholder="Employee name (e.g. Ryan)"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Employee who approached this creator. If the order is matched to an influencer, this will also update the influencer's "reached_by" field.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -2323,6 +2774,26 @@ export default function ReferenceOrdersPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Scroll to Top/Bottom Buttons */}
+      {showScrollToTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-24 right-6 z-50 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 hover:scale-110 flex items-center justify-center"
+          aria-label="Scroll to top"
+        >
+          <ChevronUp className="w-6 h-6" />
+        </button>
+      )}
+      {showScrollToBottom && (
+        <button
+          onClick={scrollToBottom}
+          className="fixed bottom-6 right-6 z-50 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 hover:scale-110 flex items-center justify-center"
+          aria-label="Scroll to bottom"
+        >
+          <ChevronDown className="w-6 h-6" />
+        </button>
       )}
     </>
   );
