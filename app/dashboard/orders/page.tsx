@@ -162,6 +162,36 @@ interface OutreachSelectionInfluencer {
   engagement_rate?: number;
 }
 
+// Helper function to validate if account_link is a valid URL
+const isValidUrl = (url: string | null | undefined): boolean => {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === '' || trimmed === 'No' || trimmed === 'N/A' || trimmed === '#REF!' || trimmed.toLowerCase() === 'none') {
+    return false;
+  }
+  try {
+    new URL(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Helper function to get TikTok URL from username if account_link is invalid
+const getAccountUrl = (accountLink: string | null | undefined, username: string | null | undefined): string | null => {
+  if (isValidUrl(accountLink)) {
+    return accountLink!;
+  }
+  // If account_link is invalid, try to construct TikTok URL from username
+  if (username) {
+    const cleanUsername = username.trim().replace(/^@/, '');
+    if (cleanUsername) {
+      return `https://www.tiktok.com/@${cleanUsername}`;
+    }
+  }
+  return null;
+};
+
 export default function ReferenceOrdersPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'orders' | 'songs'>('orders');
@@ -1999,18 +2029,21 @@ export default function ReferenceOrdersPage() {
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-sm">
-                                {order.account_link ? (
-                                  <a
-                                    href={order.account_link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:underline"
-                                  >
-                                    View
-                                  </a>
-                                ) : (
-                                  '—'
-                                )}
+                                {(() => {
+                                  const accountUrl = getAccountUrl(order.account_link, order.username);
+                                  return accountUrl ? (
+                                    <a
+                                      href={accountUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      View
+                                    </a>
+                                  ) : (
+                                    '—'
+                                  );
+                                })()}
                               </td>
                               <td className="px-6 py-4 text-sm">
                                 {order.avg_views ? (

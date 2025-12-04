@@ -79,6 +79,9 @@ export async function GET(request: NextRequest) {
         video_links,
         created_at
       `, { count: 'exact' })
+      // Default sort: non-zero price_per_video first, then by date_paid desc
+      // Use price_per_video DESC to put non-zero values first (they're higher than 0)
+      .order('price_per_video', { ascending: false, nullsFirst: false })
       .order('date_paid', { ascending: false, nullsFirst: false });
 
     if (search) {
@@ -183,7 +186,14 @@ export async function GET(request: NextRequest) {
       }
       
       // Apply custom sort
-      dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
+      // When sorting by date_paid, prioritize non-zero price_per_video first
+      if (sortColumn === 'date_paid') {
+        dbSortQuery = dbSortQuery
+          .order('price_per_video', { ascending: false, nullsFirst: false })
+          .order(sortColumn, { ascending, nullsFirst: false });
+      } else {
+        dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
+      }
       
       // Fetch only the records needed for current page
       const { data: queryData, error: queryError, count: queryCount } = await dbSortQuery.range(offset, offset + limit - 1);
@@ -845,6 +855,24 @@ export async function GET(request: NextRequest) {
         
         console.log(`[Price Per Video Sort] Sample values after sort:`, enrichedAll.slice(0, 10).map(r => r.price_per_video));
         console.log(`[Price Per Video Sort] Last 10 values after sort:`, enrichedAll.slice(-10).map(r => r.price_per_video));
+      } else if (sortBy === 'date_paid') {
+        // When sorting by date_paid, prioritize non-zero price_per_video first
+        enrichedAll.sort((a, b) => {
+          // First compare by price_per_video (non-zero first)
+          const aPrice = a.price_per_video != null && !isNaN(Number(a.price_per_video)) ? Number(a.price_per_video) : 0;
+          const bPrice = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : 0;
+          // Non-zero prices come first
+          if (aPrice > 0 && bPrice === 0) return -1;
+          if (aPrice === 0 && bPrice > 0) return 1;
+          
+          // If both are non-zero or both are zero, sort by date_paid
+          const aDate = a.date_paid ? new Date(a.date_paid).getTime() : 0;
+          const bDate = b.date_paid ? new Date(b.date_paid).getTime() : 0;
+          if (aDate === 0 && bDate === 0) return 0;
+          if (aDate === 0) return 1;
+          if (bDate === 0) return -1;
+          return ascending ? aDate - bDate : bDate - aDate;
+        });
       }
       
       console.log(`[After Sort] sortBy: ${sortBy}, sortOrder: ${ascending ? 'asc' : 'desc'}, total records: ${enrichedAll.length}`);
@@ -1050,6 +1078,15 @@ export async function GET(request: NextRequest) {
               chunkQuery = chunkQuery.lte('date_paid', dateTo);
             }
             
+            // Apply ordering: prioritize non-zero price_per_video when sorting by date_paid
+            if (sortColumn === 'date_paid') {
+              chunkQuery = chunkQuery
+                .order('price_per_video', { ascending: false, nullsFirst: false })
+                .order(sortColumn, { ascending, nullsFirst: false });
+            } else {
+              chunkQuery = chunkQuery.order(sortColumn, { ascending, nullsFirst: false });
+            }
+            
             // Fetch all records from this chunk (no pagination yet)
             let chunkData: any[] = [];
             let chunkOffset = 0;
@@ -1153,7 +1190,18 @@ export async function GET(request: NextRequest) {
           }
           
           // Sort the data
+          // When sorting by date_paid, prioritize non-zero price_per_video first
           enrichedData.sort((a: any, b: any) => {
+            // If sorting by date_paid, first compare by price_per_video (non-zero first)
+            if (sortColumn === 'date_paid') {
+              const aPrice = a.price_per_video != null && !isNaN(Number(a.price_per_video)) ? Number(a.price_per_video) : 0;
+              const bPrice = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : 0;
+              // Non-zero prices come first
+              if (aPrice > 0 && bPrice === 0) return -1;
+              if (aPrice === 0 && bPrice > 0) return 1;
+              // If both are non-zero or both are zero, sort by date_paid
+            }
+            
             const aVal = a[sortColumn];
             const bVal = b[sortColumn];
             if (aVal === null || aVal === undefined) return 1;
@@ -1252,6 +1300,15 @@ export async function GET(request: NextRequest) {
         let hasMore = true;
         let firstBatchCount = 0;
         
+        // Apply ordering: prioritize non-zero price_per_video when sorting by date_paid
+        if (sortColumn === 'date_paid') {
+          baseQuery = baseQuery
+            .order('price_per_video', { ascending: false, nullsFirst: false })
+            .order(sortColumn, { ascending, nullsFirst: false });
+        } else {
+          baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
+        }
+        
         while (hasMore) {
           const { data: batchData, error: batchError, count: batchCount } = await baseQuery.range(batchOffset, batchOffset + batchSize - 1);
           if (batchError) throw batchError;
@@ -1331,7 +1388,18 @@ export async function GET(request: NextRequest) {
         console.log(`[UNIQUE CREATORS] Before: ${beforeCount}, After: ${enrichedData.length}`);
 
         // Sort and paginate
+        // When sorting by date_paid, prioritize non-zero price_per_video first
         enrichedData.sort((a: any, b: any) => {
+          // If sorting by date_paid, first compare by price_per_video (non-zero first)
+          if (sortColumn === 'date_paid') {
+            const aPrice = a.price_per_video != null && !isNaN(Number(a.price_per_video)) ? Number(a.price_per_video) : 0;
+            const bPrice = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : 0;
+            // Non-zero prices come first
+            if (aPrice > 0 && bPrice === 0) return -1;
+            if (aPrice === 0 && bPrice > 0) return 1;
+            // If both are non-zero or both are zero, sort by date_paid
+          }
+          
           const aVal = a[sortColumn];
           const bVal = b[sortColumn];
           if (aVal === null || aVal === undefined) return 1;
@@ -1352,7 +1420,14 @@ export async function GET(request: NextRequest) {
       } else {
         // Standard path: use database sorting (more efficient)
         // Apply sorting
-        baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
+        // When sorting by date_paid (default), prioritize non-zero price_per_video first
+        if (sortColumn === 'date_paid') {
+          baseQuery = baseQuery
+            .order('price_per_video', { ascending: false, nullsFirst: false })
+            .order(sortColumn, { ascending, nullsFirst: false });
+        } else {
+          baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
+        }
         
         // Fetch only the records needed for current page
         const { data: queryData, error: queryError, count: queryCount } = await baseQuery.range(offset, offset + limit - 1);
