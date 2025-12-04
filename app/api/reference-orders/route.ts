@@ -9,6 +9,16 @@ export const revalidate = 0;
 
 const normalizeUsername = (value: string) => value.trim().toLowerCase().replace(/^@/, '');
 
+// Helper function to filter out invalid normalized usernames
+// Invalid values like "n/a", "na", "none", "null" should not be used for avg_views joins
+// Also filters out entries that start with "#" followed by invalid values
+const isValidNormalizedUsername = (username: string | null | undefined): boolean => {
+  if (!username || typeof username !== 'string') return false;
+  const normalized = username.trim().toLowerCase().replace(/^#+/, ''); // Remove leading # symbols
+  const invalidValues = ['n/a', 'na', 'none', 'null', '', 'n/a (influencer agency)', 'notion management'];
+  return !invalidValues.includes(normalized) && normalized.length > 1;
+};
+
 const parseNumber = (value: any) => {
   if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
@@ -209,7 +219,7 @@ export async function GET(request: NextRequest) {
 
       // Enrich with avg_views for just this page
       const normalizedUsernames = Array.from(
-        new Set((data || []).map((row) => row.normalized_username).filter(Boolean)),
+        new Set((data || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
       );
 
       if (normalizedUsernames.length) {
@@ -317,7 +327,7 @@ export async function GET(request: NextRequest) {
       
       // Get all normalized usernames for avg_views enrichment
       const normalizedUsernames = Array.from(
-        new Set((allData || []).map((row) => row.normalized_username).filter(Boolean)),
+        new Set((allData || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
       );
 
       let avgViewMap: Record<
@@ -398,7 +408,7 @@ export async function GET(request: NextRequest) {
           
           // Enrich with avg_views
           const normalizedUsernames = Array.from(
-            new Set(data.map((row) => row.normalized_username).filter(Boolean)),
+            new Set(data.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
           );
           
           if (normalizedUsernames.length) {
@@ -678,7 +688,7 @@ export async function GET(request: NextRequest) {
 
       // Get all normalized usernames for avg_views enrichment
       const normalizedUsernames = Array.from(
-        new Set((allData || []).map((row) => row.normalized_username).filter(Boolean)),
+        new Set((allData || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
       );
 
       let avgViewMap: Record<
@@ -1119,7 +1129,7 @@ export async function GET(request: NextRequest) {
           // Now we have all matching orders, need to sort and paginate
           // Enrich with avg_views first
           const normalizedUsernames = Array.from(
-            new Set(allMatchingOrders.map((row) => row.normalized_username).filter(Boolean)),
+            new Set(allMatchingOrders.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
           );
           
           let avgViewMap: Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }> = {};
@@ -1328,7 +1338,7 @@ export async function GET(request: NextRequest) {
         
         // Enrich with avg_views
         const normalizedUsernames = Array.from(
-          new Set(allData.map((row) => row.normalized_username).filter(Boolean)),
+          new Set(allData.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
         );
 
         let avgViewMap: Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }> = {};
@@ -1441,7 +1451,7 @@ export async function GET(request: NextRequest) {
 
         // Enrich with avg_views for just this page
       const normalizedUsernames = Array.from(
-        new Set((data || []).map((row) => row.normalized_username).filter(Boolean)),
+        new Set((data || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
       );
 
       if (normalizedUsernames.length) {
