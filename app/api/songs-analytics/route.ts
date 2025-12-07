@@ -8,20 +8,32 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const forceRefresh = searchParams.get('refresh') === 'true';
 
+    // Note: Cache refresh is now handled by backend asyncpg endpoint
+    // No need to process queue here - backend handles it directly
+
     // Check if cache exists and is recent
     const { data: cacheCheck, error: cacheCheckError } = await supabase
       .from('song_analytics_cache')
       .select('song_name')
       .limit(1);
 
-    // If cache doesn't exist or refresh requested, refresh it
+    // If cache doesn't exist or refresh requested, refresh it via backend
     if (cacheCheckError || !cacheCheck || cacheCheck.length === 0 || forceRefresh) {
       console.log('Refreshing song analytics cache...');
       
       try {
-        // Call the refresh function
-        await supabase.rpc('refresh_song_analytics_cache');
-        console.log('Song analytics cache refreshed successfully');
+        // Call backend endpoint that uses asyncpg for reliable refresh
+        const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const response = await fetch(`${backendUrl}/api/v1/song-analytics/refresh-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (response.ok) {
+          console.log('Song analytics cache refreshed successfully');
+        } else {
+          console.error('Failed to refresh cache:', await response.text());
+        }
       } catch (refreshError: any) {
         console.error('Error refreshing cache:', refreshError);
         // Continue anyway - try to read whatever data exists
@@ -100,20 +112,35 @@ export async function POST() {
 
     console.log('Manually refreshing song analytics cache...');
     
-    // Call the refresh function
-    const { error } = await supabase.rpc('refresh_song_analytics_cache');
-    
-    if (error) throw error;
-
-    console.log('Song analytics cache refreshed successfully');
-
-    return Response.json({ 
-      success: true, 
-      message: 'Song analytics cache refreshed successfully' 
-    });
+    // Call backend endpoint that uses asyncpg for reliable refresh
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    try {
+      const response = await fetch(`${backendUrl}/api/v1/song-analytics/refresh-cache`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to refresh cache');
+      }
+      
+      const result = await response.json();
+      console.log('Song analytics cache refreshed successfully');
+      
+      return Response.json({ 
+        success: true, 
+        message: result.message || 'Song analytics cache refreshed successfully'
+      });
+    } catch (err: any) {
+      console.error('Refresh cache error:', err);
+      return Response.json({ 
+        error: err.message || 'Failed to refresh cache' 
+      }, { status: 500 });
+    }
   } catch (error: any) {
     console.error('Refresh cache error:', error);
-    return Response.json({ error: error.message || 'Failed to refresh cache' }, { status: 500 });
+    return Response.json({ error: error.message || 'Failed to queue cache refresh' }, { status: 500 });
   }
 }
 

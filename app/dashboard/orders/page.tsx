@@ -2032,16 +2032,16 @@ export default function ReferenceOrdersPage() {
                                 {(() => {
                                   const accountUrl = getAccountUrl(order.account_link, order.username);
                                   return accountUrl ? (
-                                    <a
+                                  <a
                                       href={accountUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 hover:underline"
-                                    >
-                                      View
-                                    </a>
-                                  ) : (
-                                    '—'
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    View
+                                  </a>
+                                ) : (
+                                  '—'
                                   );
                                 })()}
                               </td>

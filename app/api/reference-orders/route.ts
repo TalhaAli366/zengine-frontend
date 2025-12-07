@@ -1032,8 +1032,8 @@ export async function GET(request: NextRequest) {
           let allMatchingOrders: any[] = [];
           let totalCount = 0;
           
-          // Fetch orders for each chunk
-          for (const chunk of usernameChunks) {
+          // Helper function to fetch orders for a single chunk
+          const fetchChunkOrders = async (chunk: string[]): Promise<{ orders: any[], count: number }> => {
             let chunkQuery = supabase
               .from('reference_orders')
               .select(`
@@ -1102,13 +1102,14 @@ export async function GET(request: NextRequest) {
             let chunkOffset = 0;
             const chunkBatchSize = 1000;
             let hasMore = true;
+            let chunkCount = 0;
             
             while (hasMore) {
               const { data: batchData, error: batchError, count: batchCount } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
               if (batchError) throw batchError;
               
               if (chunkOffset === 0 && batchCount !== null) {
-                totalCount += batchCount;
+                chunkCount = batchCount;
               }
               
               if (batchData && batchData.length > 0) {
@@ -1120,8 +1121,30 @@ export async function GET(request: NextRequest) {
               }
             }
             
-            allMatchingOrders = allMatchingOrders.concat(chunkData);
-            console.log(`[AVG_VIEWS FILTER BATCH] Fetched ${chunkData.length} orders from chunk (${chunk.length} creators), total so far: ${allMatchingOrders.length}`);
+            return { orders: chunkData, count: chunkCount };
+          };
+          
+          // Process chunks in parallel (15 at a time)
+          const parallelBatchSize = 15;
+          for (let i = 0; i < usernameChunks.length; i += parallelBatchSize) {
+            const chunkBatch = usernameChunks.slice(i, i + parallelBatchSize);
+            console.log(`[AVG_VIEWS FILTER BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, usernameChunks.length)} of ${usernameChunks.length} in parallel`);
+            
+            const results = await Promise.allSettled(
+              chunkBatch.map(chunk => fetchChunkOrders(chunk))
+            );
+            
+            // Collect successful results
+            for (let j = 0; j < results.length; j++) {
+              const result = results[j];
+              if (result.status === 'fulfilled') {
+                allMatchingOrders = allMatchingOrders.concat(result.value.orders);
+                totalCount += result.value.count;
+                console.log(`[AVG_VIEWS FILTER BATCH] Fetched ${result.value.orders.length} orders from chunk (${chunkBatch[j].length} creators), total so far: ${allMatchingOrders.length}`);
+              } else {
+                console.error(`[AVG_VIEWS FILTER BATCH] Error processing chunk (${chunkBatch[j].length} creators):`, result.reason);
+              }
+            }
           }
           
           console.log(`[AVG_VIEWS FILTER] Total matching orders fetched: ${allMatchingOrders.length}, total count: ${totalCount}`);
@@ -1595,6 +1618,20 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase.from('reference_orders').insert([payload]).select().single();
     if (error) throw error;
 
+    // Refresh song analytics cache using backend asyncpg (non-blocking)
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    fetch(`${backendUrl}/api/v1/song-analytics/refresh-cache`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(() => {
+        console.log('Song cache refresh initiated via backend');
+      })
+      .catch((err) => {
+        console.error('Failed to refresh song cache:', err);
+        // Don't fail the insert if cache refresh fails
+      });
+
     return Response.json({ success: true, order: data });
   } catch (error: any) {
     console.error('Manual reference order error:', error);
@@ -1708,6 +1745,21 @@ export async function PATCH(request: NextRequest) {
 
     if (error) throw error;
 
+    // Refresh song analytics cache using backend asyncpg (non-blocking)
+    // This bypasses Supabase REST API timeouts
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    fetch(`${backendUrl}/api/v1/song-analytics/refresh-cache`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(() => {
+        console.log('Song cache refresh initiated via backend');
+      })
+      .catch((err) => {
+        console.error('Failed to refresh song cache:', err);
+        // Don't fail the update if cache refresh fails
+      });
+
     return Response.json({ success: true, order: data });
   } catch (error: any) {
     console.error('Update reference order error:', error);
@@ -1735,6 +1787,20 @@ export async function DELETE(request: NextRequest) {
 
     const { error } = await supabase.from('reference_orders').delete().eq('id', orderId);
     if (error) throw error;
+
+    // Refresh song analytics cache using backend asyncpg (non-blocking)
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    fetch(`${backendUrl}/api/v1/song-analytics/refresh-cache`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(() => {
+        console.log('Song cache refresh initiated via backend');
+      })
+      .catch((err) => {
+        console.error('Failed to refresh song cache:', err);
+        // Don't fail the delete if cache refresh fails
+      });
 
     return Response.json({ success: true });
   } catch (error: any) {

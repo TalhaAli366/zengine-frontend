@@ -182,68 +182,74 @@ export async function GET(request: NextRequest) {
     let query: any;
     
     // If we have influencer IDs and they're > 1000, we need to fetch in batches
+    // Use very small chunks (50) to avoid HTTP header overflow errors
+    // HeadersOverflowError occurs when URL/headers are too large with many IDs + filters
+    const batchChunkSize = 50;
     if (influencerIds && influencerIds.length > chunkSize) {
-      console.log(`[INFLUENCERS API] ${influencerIds.length} matching influencers (exceeds ${chunkSize} limit), fetching in batches`);
+      console.log(`[INFLUENCERS API] ${influencerIds.length} matching influencers (exceeds ${chunkSize} limit), fetching in batches of ${batchChunkSize}`);
       
-      // Split influencer IDs into chunks
+      // Split influencer IDs into smaller chunks to avoid URL length issues
       const idChunks: string[][] = [];
-      for (let i = 0; i < influencerIds.length; i += chunkSize) {
-        idChunks.push(influencerIds.slice(i, i + chunkSize));
+      for (let i = 0; i < influencerIds.length; i += batchChunkSize) {
+        idChunks.push(influencerIds.slice(i, i + batchChunkSize));
       }
       
-      // Fetch influencers for each chunk
+      // Process chunks in parallel for speed (Supabase Pro plan can handle this)
+      // Process in groups of 15 chunks at a time to balance speed and connection limits
+      const parallelBatchSize = 15;
       let allMatchingInfluencers: any[] = [];
-      let totalCount = 0;
       
-      for (const chunk of idChunks) {
-        let chunkQuery = supabase
+      // Helper function to fetch a single chunk
+      const fetchChunk = async (chunk: string[]): Promise<any[]> => {
+        // Build data query for this chunk
+        let dataQuery = supabase
           .from('influencers')
-          .select('*', { count: 'exact' })
+          .select('*')
           .in('id', chunk);
         
         // Apply all other filters to each chunk
         if (searchQuery) {
-          chunkQuery = chunkQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
+          dataQuery = dataQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
         }
         if (minFollowers) {
-          chunkQuery = chunkQuery.gte('followers', parseInt(minFollowers));
+          dataQuery = dataQuery.gte('followers', parseInt(minFollowers));
         }
         if (maxFollowers) {
-          chunkQuery = chunkQuery.lte('followers', parseInt(maxFollowers));
+          dataQuery = dataQuery.lte('followers', parseInt(maxFollowers));
         }
         if (minEngagementRate) {
-          chunkQuery = chunkQuery.gte('engagement_rate', parseFloat(minEngagementRate));
+          dataQuery = dataQuery.gte('engagement_rate', parseFloat(minEngagementRate));
         }
         if (maxEngagementRate) {
-          chunkQuery = chunkQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
+          dataQuery = dataQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
         }
         if (minAvgViews) {
-          chunkQuery = chunkQuery.gte('avg_views', parseFloat(minAvgViews));
+          dataQuery = dataQuery.gte('avg_views', parseFloat(minAvgViews));
         }
         if (maxAvgViews) {
-          chunkQuery = chunkQuery.lte('avg_views', parseFloat(maxAvgViews));
+          dataQuery = dataQuery.lte('avg_views', parseFloat(maxAvgViews));
         }
         if (reachedOut === 'true') {
-          chunkQuery = chunkQuery.eq('has_outreach', true);
+          dataQuery = dataQuery.eq('has_outreach', true);
         } else if (reachedOut === 'false') {
-          chunkQuery = chunkQuery.eq('has_outreach', false);
+          dataQuery = dataQuery.eq('has_outreach', false);
         }
         if (hasEmail === 'true') {
-          chunkQuery = chunkQuery.not('email', 'is', null).not('email', 'eq', '');
+          dataQuery = dataQuery.not('email', 'is', null).not('email', 'eq', '');
         }
         
-        // Fetch all records from this chunk (no pagination yet)
+        // Fetch all records from this chunk in batches
         let chunkData: any[] = [];
         let chunkOffset = 0;
         const chunkBatchSize = 1000;
         let hasMore = true;
         
         while (hasMore) {
-          const { data: batchData, error: batchError, count: batchCount } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
-          if (batchError) throw batchError;
+          const { data: batchData, error: batchError } = await dataQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
           
-          if (chunkOffset === 0 && batchCount !== null) {
-            totalCount += batchCount;
+          if (batchError) {
+            console.error(`[INFLUENCERS API BATCH] Error fetching chunk batch at offset ${chunkOffset}:`, batchError);
+            throw batchError;
           }
           
           if (batchData && batchData.length > 0) {
@@ -255,9 +261,33 @@ export async function GET(request: NextRequest) {
           }
         }
         
-        allMatchingInfluencers = allMatchingInfluencers.concat(chunkData);
-        console.log(`[INFLUENCERS API BATCH] Fetched ${chunkData.length} influencers from chunk (${chunk.length} IDs), total so far: ${allMatchingInfluencers.length}`);
+        return chunkData;
+      };
+      
+      // Process chunks in parallel batches
+      for (let i = 0; i < idChunks.length; i += parallelBatchSize) {
+        const chunkBatch = idChunks.slice(i, i + parallelBatchSize);
+        console.log(`[INFLUENCERS API BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, idChunks.length)} of ${idChunks.length} in parallel`);
+        
+        const results = await Promise.allSettled(
+          chunkBatch.map(chunk => fetchChunk(chunk))
+        );
+        
+        // Collect successful results
+        for (let j = 0; j < results.length; j++) {
+          const result = results[j];
+          if (result.status === 'fulfilled') {
+            allMatchingInfluencers = allMatchingInfluencers.concat(result.value);
+            console.log(`[INFLUENCERS API BATCH] Fetched ${result.value.length} influencers from chunk (${chunkBatch[j].length} IDs), total so far: ${allMatchingInfluencers.length}`);
+          } else {
+            console.error(`[INFLUENCERS API BATCH] Error processing chunk (${chunkBatch[j].length} IDs):`, result.reason);
+            // Continue with other chunks - partial results are better than none
+          }
+        }
       }
+      
+      // Use fetched length as total count (we fetched all matching records)
+      const totalCount = allMatchingInfluencers.length;
       
       console.log(`[INFLUENCERS API] Total matching influencers fetched: ${allMatchingInfluencers.length}, total count: ${totalCount}`);
       
@@ -293,26 +323,28 @@ export async function GET(request: NextRequest) {
     }
     
     // Build normal query (either no influencer IDs, or <= 1000 influencer IDs)
-    // Note: Even with < 1000 IDs, we might hit URL length limits, so use batching for > 100 IDs
+    // Note: Even with < 1000 IDs, we might hit URL length limits, so use batching for > 50 IDs
     if (influencerIds && influencerIds.length > 0) {
-      if (influencerIds.length > 100) {
+      if (influencerIds.length > 50) {
         // Use batching even for < 1000 IDs to avoid URL length issues
+        // Use small chunks (50) to prevent header overflow
         console.log(`[INFLUENCERS API] ${influencerIds.length} influencer IDs - using batching to avoid URL length limits`);
         
-        // Split into chunks of 100
+        // Split into chunks of 50
         const idChunks: string[][] = [];
-        for (let i = 0; i < influencerIds.length; i += 100) {
-          idChunks.push(influencerIds.slice(i, i + 100));
+        for (let i = 0; i < influencerIds.length; i += 50) {
+          idChunks.push(influencerIds.slice(i, i + 50));
         }
         
-        // Fetch influencers for each chunk
+        // Process chunks in parallel for speed
+        const parallelBatchSize = 15;
         let allMatchingInfluencers: any[] = [];
-        let totalCount = 0;
         
-        for (const chunk of idChunks) {
+        // Helper function to fetch a single chunk
+        const fetchChunk = async (chunk: string[]): Promise<any[]> => {
           let chunkQuery = supabase
             .from('influencers')
-            .select('*', { count: 'exact' })
+            .select('*')
             .in('id', chunk);
           
           // Apply all other filters to each chunk
@@ -353,12 +385,8 @@ export async function GET(request: NextRequest) {
           let hasMore = true;
           
           while (hasMore) {
-            const { data: batchData, error: batchError, count: batchCount } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
+            const { data: batchData, error: batchError } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
             if (batchError) throw batchError;
-            
-            if (chunkOffset === 0 && batchCount !== null) {
-              totalCount += batchCount;
-            }
             
             if (batchData && batchData.length > 0) {
               chunkData = chunkData.concat(batchData);
@@ -369,10 +397,31 @@ export async function GET(request: NextRequest) {
             }
           }
           
-          allMatchingInfluencers = allMatchingInfluencers.concat(chunkData);
-          console.log(`[INFLUENCERS API BATCH] Fetched ${chunkData.length} influencers from chunk (${chunk.length} IDs), total so far: ${allMatchingInfluencers.length}`);
+          return chunkData;
+        };
+        
+        // Process chunks in parallel batches
+        for (let i = 0; i < idChunks.length; i += parallelBatchSize) {
+          const chunkBatch = idChunks.slice(i, i + parallelBatchSize);
+          console.log(`[INFLUENCERS API BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, idChunks.length)} of ${idChunks.length} in parallel`);
+          
+          const results = await Promise.allSettled(
+            chunkBatch.map(chunk => fetchChunk(chunk))
+          );
+          
+          // Collect successful results
+          for (let j = 0; j < results.length; j++) {
+            const result = results[j];
+            if (result.status === 'fulfilled') {
+              allMatchingInfluencers = allMatchingInfluencers.concat(result.value);
+              console.log(`[INFLUENCERS API BATCH] Fetched ${result.value.length} influencers from chunk (${chunkBatch[j].length} IDs), total so far: ${allMatchingInfluencers.length}`);
+            } else {
+              console.error(`[INFLUENCERS API BATCH] Error processing chunk (${chunkBatch[j].length} IDs):`, result.reason);
+            }
+          }
         }
         
+        const totalCount = allMatchingInfluencers.length;
         console.log(`[INFLUENCERS API] Total matching influencers fetched: ${allMatchingInfluencers.length}, total count: ${totalCount}`);
         
         // Sort all data by last_scraped
@@ -634,13 +683,17 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
       });
     }
   } else {
-    // Complex case: > 1000 influencers, fetch in batches
+    // Complex case: > 1000 influencers, fetch in batches in parallel
     const idChunks: string[][] = [];
     for (let i = 0; i < influencerIds.length; i += chunkSize) {
       idChunks.push(influencerIds.slice(i, i + chunkSize));
     }
     
-    for (const chunk of idChunks) {
+    // Helper function to fetch associations for a single chunk
+    const fetchChunkAssociations = async (chunk: string[]): Promise<{ campaignMap: Record<string, string[]>, orderMap: Record<string, any> }> => {
+      const chunkCampaignMap: Record<string, string[]> = {};
+      const chunkOrderMap: Record<string, any> = {};
+      
       // Fetch campaign links for this chunk
       const { data: campaignLinks, error: linkError } = await supabase
         .from('campaign_influencers')
@@ -665,11 +718,11 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
             const infId = link.influencer_id;
             const campaignName = campaignNameMap[link.campaign_id];
             if (campaignName) {
-              if (!campaignMap[infId]) {
-                campaignMap[infId] = [];
+              if (!chunkCampaignMap[infId]) {
+                chunkCampaignMap[infId] = [];
               }
-              if (!campaignMap[infId].includes(campaignName)) {
-                campaignMap[infId].push(campaignName);
+              if (!chunkCampaignMap[infId].includes(campaignName)) {
+                chunkCampaignMap[infId].push(campaignName);
               }
             }
           });
@@ -685,9 +738,40 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
       if (!orderError && orderRows) {
         orderRows.forEach((row: any) => {
           if (row.influencer_id) {
-            orderMap[row.influencer_id] = row;
+            chunkOrderMap[row.influencer_id] = row;
           }
         });
+      }
+      
+      return { campaignMap: chunkCampaignMap, orderMap: chunkOrderMap };
+    };
+    
+    // Process chunks in parallel (15 at a time)
+    const parallelBatchSize = 15;
+    for (let i = 0; i < idChunks.length; i += parallelBatchSize) {
+      const chunkBatch = idChunks.slice(i, i + parallelBatchSize);
+      const results = await Promise.allSettled(
+        chunkBatch.map(chunk => fetchChunkAssociations(chunk))
+      );
+      
+      // Merge results
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          // Merge campaign map
+          Object.keys(result.value.campaignMap).forEach(infId => {
+            if (!campaignMap[infId]) {
+              campaignMap[infId] = [];
+            }
+            result.value.campaignMap[infId].forEach((campName: string) => {
+              if (!campaignMap[infId].includes(campName)) {
+                campaignMap[infId].push(campName);
+              }
+            });
+          });
+          
+          // Merge order map
+          Object.assign(orderMap, result.value.orderMap);
+        }
       }
     }
   }
