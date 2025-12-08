@@ -387,121 +387,457 @@ export async function GET(request: NextRequest) {
     // If uniqueCreators is true, use the efficient database function
     else if (uniqueCreators) {
       try {
-        const { data: rpcData, error: rpcError } = await supabase.rpc('get_unique_reference_orders', {
-          p_limit: limit,
-          p_offset: offset,
-          p_sort_by: sortBy,
-          p_sort_order: sortOrder
-        });
+        // CRITICAL: If avg_views filters are present, filter at database level FIRST
+        // before calling get_unique_reference_orders
+        let matchingNormalizedUsernames: string[] | null = null;
         
-        if (rpcError) throw rpcError;
-        
-        if (rpcData && rpcData.length > 0) {
-          // Get total count from first row
-          count = rpcData[0].total_count || 0;
+        if (minAvgViews || maxAvgViews) {
+          console.log(`[UNIQUE CREATORS + AVG_VIEWS] Filtering avg_views at database level first`);
+          // First, get normalized_usernames that match the avg_views filter
+          let avgViewsQuery = supabase
+            .from('reference_creator_avg_views')
+            .select('normalized_username');
           
-          // Remove total_count from data
-          data = rpcData.map((row: any) => {
-            const { total_count, ...rest } = row;
-            return rest;
-          });
-          
-          // Enrich with avg_views
-          const normalizedUsernames = Array.from(
-            new Set(data.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
-          );
-          
-          if (normalizedUsernames.length) {
-            const { data: avgRows, error: avgError } = await supabase
-              .from('reference_creator_avg_views')
-              .select('normalized_username, avg_views, status, last_calculated_at')
-              .in('normalized_username', normalizedUsernames);
-            
-            if (!avgError && avgRows) {
-              const avgViewMap = avgRows.reduce((acc: any, row: any) => {
-                const normalized = row.normalized_username;
-                if (!normalized) return acc;
-                acc[normalized] = {
-                  avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
-                  status: row.status,
-                  last_calculated_at: row.last_calculated_at,
-                };
-                return acc;
-              }, {});
-              
-              data = data.map((row) => {
-                const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
-                return {
-                  ...row,
-                  avg_views: avgViewEntry?.avg_views ?? null,
-                  avg_views_status: avgViewEntry?.status ?? null,
-                  avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
-                };
-              });
-            }
-          }
-          
-          // Apply client-side filters (search, owner, etc.) if needed
-          if (search) {
-            const encoded = search.toLowerCase();
-            data = data.filter((row) => {
-              const username = (row.username || '').toLowerCase();
-              const accountLink = (row.account_link || '').toLowerCase();
-              return username.includes(encoded) || accountLink.includes(encoded);
-            });
-            count = data.length; // Update count after filtering
-          }
-          if (owner) {
-            const ownerLower = owner.toLowerCase();
-            data = data.filter((row) => (row.owner_name || '').toLowerCase().includes(ownerLower));
-            count = data.length;
-          }
-          if (approved === 'yes') {
-            data = data.filter((row) => row.approved_vendor === true);
-            count = data.length;
-          } else if (approved === 'no') {
-            data = data.filter((row) => row.approved_vendor === false);
-            count = data.length;
-          }
-          if (paid === 'paid') {
-            data = data.filter((row) => row.paid === true);
-            count = data.length;
-          } else if (paid === 'unpaid') {
-            data = data.filter((row) => row.paid === false);
-            count = data.length;
-          }
-          if (matched === 'true') {
-            data = data.filter((row) => row.influencer_id !== null);
-            count = data.length;
-          } else if (matched === 'false') {
-            data = data.filter((row) => row.influencer_id === null);
-            count = data.length;
-          }
-          if (dateFrom) {
-            data = data.filter((row) => row.date_paid && row.date_paid >= dateFrom);
-            count = data.length;
-          }
-          if (dateTo) {
-            data = data.filter((row) => row.date_paid && row.date_paid <= dateTo);
-            count = data.length;
-          }
           if (minAvgViews) {
             const minVal = parseFloat(minAvgViews);
             if (!isNaN(minVal)) {
-              data = data.filter((row) => row.avg_views !== null && row.avg_views >= minVal);
-              count = data.length;
+              avgViewsQuery = avgViewsQuery.gte('avg_views', minVal);
             }
           }
           if (maxAvgViews) {
             const maxVal = parseFloat(maxAvgViews);
             if (!isNaN(maxVal)) {
-              data = data.filter((row) => row.avg_views !== null && row.avg_views <= maxVal);
-              count = data.length;
+              avgViewsQuery = avgViewsQuery.lte('avg_views', maxVal);
             }
           }
+          
+          // Also filter out null avg_views
+          avgViewsQuery = avgViewsQuery.not('avg_views', 'is', null);
+          
+          // Fetch ALL matching usernames in batches (Supabase default limit is 1000)
+          let allAvgViewsData: any[] = [];
+          let avgViewsOffset = 0;
+          const avgViewsBatchSize = 1000;
+          let hasMoreAvgViews = true;
+          
+          while (hasMoreAvgViews) {
+            const { data: batchData, error: batchError } = await avgViewsQuery
+              .range(avgViewsOffset, avgViewsOffset + avgViewsBatchSize - 1);
+            
+            if (batchError) {
+              console.error(`[AVG_VIEWS FILTER ERROR]`, batchError);
+              throw batchError;
+            }
+            
+            if (batchData && batchData.length > 0) {
+              allAvgViewsData = allAvgViewsData.concat(batchData);
+              avgViewsOffset += avgViewsBatchSize;
+              hasMoreAvgViews = batchData.length === avgViewsBatchSize;
+            } else {
+              hasMoreAvgViews = false;
+            }
+          }
+          
+          matchingNormalizedUsernames = allAvgViewsData.map((row) => row.normalized_username).filter(Boolean);
+          console.log(`[UNIQUE CREATORS + AVG_VIEWS] Found ${matchingNormalizedUsernames.length} creators matching avg_views filter`);
+          
+          // If no creators match, return empty result early
+          if (matchingNormalizedUsernames.length === 0) {
+            return Response.json({
+              data: [],
+              total: 0,
+              page,
+              limit,
+              totalPages: 0,
+              stats: {
+                totalOrders: 0,
+                totalCreators: 0,
+                avgPricePerVideo: 0,
+                totalSpend: 0,
+              },
+              owners: [],
+            }, {
+              headers: {
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+              },
+            });
+          }
+        }
+        
+        // If we have avg_views filter, we need to fetch unique orders manually
+        // because get_unique_reference_orders doesn't support filtering by normalized_usernames
+        if (matchingNormalizedUsernames && matchingNormalizedUsernames.length > 0) {
+          console.log(`[UNIQUE CREATORS + AVG_VIEWS] Fetching unique orders for ${matchingNormalizedUsernames.length} creators`);
+          
+          // Split usernames into smaller chunks for parallel processing
+          // Use smaller chunks (50) to avoid URL length issues
+          const batchChunkSize = 50;
+          const usernameChunks: string[][] = [];
+          for (let i = 0; i < matchingNormalizedUsernames.length; i += batchChunkSize) {
+            usernameChunks.push(matchingNormalizedUsernames.slice(i, i + batchChunkSize));
+          }
+          
+          let allMatchingOrders: any[] = [];
+          
+          // Helper function to fetch orders for a single chunk
+          const fetchChunk = async (chunk: string[]): Promise<any[]> => {
+            try {
+              // Build query for this chunk
+              let chunkQuery = supabase
+                .from('reference_orders')
+                .select(`
+                  id,
+                  influencer_id,
+                  username,
+                  normalized_username,
+                  email,
+                  account_link,
+                  owner_name,
+                  approved_vendor,
+                  total_fee_per_import,
+                  price_usd,
+                  video_count,
+                  final_price,
+                  price_per_video,
+                  songs,
+                  paid,
+                  date_paid,
+                  video_links,
+                  created_at
+                `)
+                .in('normalized_username', chunk);
+              
+              // Apply all other filters to each chunk
+              if (search) {
+                const encoded = `%${search}%`;
+                chunkQuery = chunkQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+              }
+              if (owner) {
+                chunkQuery = chunkQuery.ilike('owner_name', `%${owner}%`);
+              }
+              if (approved === 'yes') {
+                chunkQuery = chunkQuery.eq('approved_vendor', true);
+              } else if (approved === 'no') {
+                chunkQuery = chunkQuery.eq('approved_vendor', false);
+              }
+              if (paid === 'paid') {
+                chunkQuery = chunkQuery.eq('paid', true);
+              } else if (paid === 'unpaid') {
+                chunkQuery = chunkQuery.eq('paid', false);
+              }
+              if (matched === 'true') {
+                chunkQuery = chunkQuery.not('influencer_id', 'is', null);
+              } else if (matched === 'false') {
+                chunkQuery = chunkQuery.is('influencer_id', null);
+              }
+              if (dateFrom) {
+                chunkQuery = chunkQuery.gte('date_paid', dateFrom);
+              }
+              if (dateTo) {
+                chunkQuery = chunkQuery.lte('date_paid', dateTo);
+              }
+              
+              // Fetch all records from this chunk in batches (handles Supabase 1000 row limit)
+              let chunkData: any[] = [];
+              let chunkOffset = 0;
+              const chunkBatchSize = 1000;
+              let hasMore = true;
+              
+              while (hasMore) {
+                const { data: batchData, error: batchError } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
+                
+                if (batchError) {
+                  console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error fetching chunk batch at offset ${chunkOffset}:`, {
+                    message: batchError.message,
+                    details: batchError.details,
+                    hint: batchError.hint,
+                    code: batchError.code
+                  });
+                  throw batchError;
+                }
+                
+                if (batchData && batchData.length > 0) {
+                  chunkData = chunkData.concat(batchData);
+                  chunkOffset += chunkBatchSize;
+                  hasMore = batchData.length === chunkBatchSize;
+                } else {
+                  hasMore = false;
+                }
+              }
+              
+              return chunkData;
+            } catch (chunkError: any) {
+              console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error processing chunk (${chunk.length} usernames):`, {
+                message: chunkError.message,
+                details: chunkError.details,
+                hint: chunkError.hint,
+                code: chunkError.code
+              });
+              throw chunkError; // Re-throw to be caught by Promise.allSettled
+            }
+          };
+          
+          // Process chunks in parallel (15 at a time for speed)
+          const parallelBatchSize = 15;
+          for (let i = 0; i < usernameChunks.length; i += parallelBatchSize) {
+            const chunkBatch = usernameChunks.slice(i, i + parallelBatchSize);
+            console.log(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, usernameChunks.length)} of ${usernameChunks.length} in parallel`);
+            
+            const results = await Promise.allSettled(
+              chunkBatch.map(chunk => fetchChunk(chunk))
+            );
+            
+            // Collect successful results
+            for (let j = 0; j < results.length; j++) {
+              const result = results[j];
+              if (result.status === 'fulfilled') {
+                allMatchingOrders = allMatchingOrders.concat(result.value);
+                console.log(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Fetched ${result.value.length} orders from chunk (${chunkBatch[j].length} usernames), total so far: ${allMatchingOrders.length}`);
+              } else {
+                console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error processing chunk (${chunkBatch[j].length} usernames):`, result.reason);
+                // Continue with other chunks - partial results are better than none
+              }
+            }
+          }
+          
+          console.log(`[UNIQUE CREATORS + AVG_VIEWS] Fetched ${allMatchingOrders.length} total orders`);
+          
+          // Deduplicate: keep only latest order per normalized_username
+          const creatorMap = new Map<string, any>();
+          for (const row of allMatchingOrders) {
+            if (!row.normalized_username) continue;
+            const existing = creatorMap.get(row.normalized_username);
+            if (!existing) {
+              creatorMap.set(row.normalized_username, row);
+            } else {
+              // Compare dates: prefer row with date_paid, or if both have dates, prefer the later one
+              const rowDate = row.date_paid ? new Date(row.date_paid).getTime() : 0;
+              const existingDate = existing.date_paid ? new Date(existing.date_paid).getTime() : 0;
+              if (rowDate > existingDate) {
+                creatorMap.set(row.normalized_username, row);
+              } else if (rowDate === 0 && existingDate === 0) {
+                // Both have no date_paid, use created_at as fallback
+                const rowCreated = row.created_at ? new Date(row.created_at).getTime() : 0;
+                const existingCreated = existing.created_at ? new Date(existing.created_at).getTime() : 0;
+                if (rowCreated > existingCreated) {
+                  creatorMap.set(row.normalized_username, row);
+                }
+              }
+            }
+          }
+          
+          let uniqueOrders = Array.from(creatorMap.values());
+          console.log(`[UNIQUE CREATORS + AVG_VIEWS] After deduplication: ${uniqueOrders.length} unique creators`);
+          
+          // Enrich with avg_views (we already have matching usernames, but need to fetch full avg_views data)
+          const normalizedUsernames = Array.from(
+            new Set(uniqueOrders.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
+          );
+          
+          if (normalizedUsernames.length) {
+            // Fetch avg_views in parallel batches if needed
+            const avgViewChunkSize = 1000;
+            const avgViewChunks: string[][] = [];
+            for (let i = 0; i < normalizedUsernames.length; i += avgViewChunkSize) {
+              avgViewChunks.push(normalizedUsernames.slice(i, i + avgViewChunkSize));
+            }
+            
+            let avgViewMap: Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }> = {};
+            
+            // Process avg_views chunks in parallel (15 at a time)
+            const parallelAvgBatchSize = 15;
+            for (let i = 0; i < avgViewChunks.length; i += parallelAvgBatchSize) {
+              const avgChunkBatch = avgViewChunks.slice(i, i + parallelAvgBatchSize);
+              
+              const avgResults = await Promise.allSettled(
+                avgChunkBatch.map(async (avgChunk) => {
+                  const { data: avgRows, error: avgError } = await supabase
+                    .from('reference_creator_avg_views')
+                    .select('normalized_username, avg_views, status, last_calculated_at')
+                    .in('normalized_username', avgChunk);
+                  
+                  if (avgError) throw avgError;
+                  return avgRows || [];
+                })
+              );
+              
+              // Collect successful results
+              for (const result of avgResults) {
+                if (result.status === 'fulfilled') {
+                  (result.value || []).forEach((row) => {
+                    const normalized = row.normalized_username;
+                    if (!normalized) return;
+                    avgViewMap[normalized] = {
+                      avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+                      status: row.status,
+                      last_calculated_at: row.last_calculated_at,
+                    };
+                  });
+                } else {
+                  console.error(`[UNIQUE CREATORS + AVG_VIEWS] Error fetching avg_views chunk:`, result.reason);
+                }
+              }
+            }
+            
+            uniqueOrders = uniqueOrders.map((row) => {
+              const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+              return {
+                ...row,
+                avg_views: avgViewEntry?.avg_views ?? null,
+                avg_views_status: avgViewEntry?.status ?? null,
+                avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+              };
+            });
+          }
+          
+          // Apply sorting
+          if (sortColumn === 'date_paid') {
+            uniqueOrders.sort((a: any, b: any) => {
+              const aPrice = a.price_per_video != null && !isNaN(Number(a.price_per_video)) ? Number(a.price_per_video) : 0;
+              const bPrice = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : 0;
+              if (aPrice > 0 && bPrice === 0) return -1;
+              if (aPrice === 0 && bPrice > 0) return 1;
+              
+              const aDate = a.date_paid ? new Date(a.date_paid).getTime() : 0;
+              const bDate = b.date_paid ? new Date(b.date_paid).getTime() : 0;
+              if (aDate === 0 && bDate === 0) return 0;
+              if (aDate === 0) return 1;
+              if (bDate === 0) return -1;
+              return ascending ? aDate - bDate : bDate - aDate;
+            });
+          } else if (sortColumn === 'price_per_video') {
+            uniqueOrders.sort((a: any, b: any) => {
+              const aNum = a.price_per_video != null && !isNaN(Number(a.price_per_video)) ? Number(a.price_per_video) : null;
+              const bNum = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : null;
+              if (aNum === null) return 1;
+              if (bNum === null) return -1;
+              return ascending ? aNum - bNum : bNum - aNum;
+            });
+          } else if (sortColumn === 'owner_name') {
+            uniqueOrders.sort((a: any, b: any) => {
+              const aVal = (a.owner_name || '').toLowerCase();
+              const bVal = (b.owner_name || '').toLowerCase();
+              if (!aVal && !bVal) return 0;
+              if (!aVal) return 1;
+              if (!bVal) return -1;
+              if (aVal < bVal) return ascending ? -1 : 1;
+              if (aVal > bVal) return ascending ? 1 : -1;
+              return 0;
+            });
+          }
+          
+          // Update count and paginate
+          count = uniqueOrders.length;
+          const paginationOffset = (page - 1) * limit;
+          data = uniqueOrders.slice(paginationOffset, paginationOffset + limit);
+          
+          console.log(`[UNIQUE CREATORS + AVG_VIEWS] Returning page ${page}: ${data.length} records out of ${count} total`);
         } else {
-          count = 0;
-          data = [];
+          // No avg_views filter, use RPC function as before
+          const { data: rpcData, error: rpcError } = await supabase.rpc('get_unique_reference_orders', {
+            p_limit: limit,
+            p_offset: offset,
+            p_sort_by: sortBy,
+            p_sort_order: sortOrder
+          });
+          
+          if (rpcError) throw rpcError;
+          
+          if (rpcData && rpcData.length > 0) {
+            // Get total count from first row
+            count = rpcData[0].total_count || 0;
+            
+            // Remove total_count from data
+            data = rpcData.map((row: any) => {
+              const { total_count, ...rest } = row;
+              return rest;
+            });
+            
+            // Enrich with avg_views
+            const normalizedUsernames = Array.from(
+              new Set(data.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
+            );
+            
+            if (normalizedUsernames.length) {
+              const { data: avgRows, error: avgError } = await supabase
+                .from('reference_creator_avg_views')
+                .select('normalized_username, avg_views, status, last_calculated_at')
+                .in('normalized_username', normalizedUsernames);
+              
+              if (!avgError && avgRows) {
+                const avgViewMap = avgRows.reduce((acc: any, row: any) => {
+                  const normalized = row.normalized_username;
+                  if (!normalized) return acc;
+                  acc[normalized] = {
+                    avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+                    status: row.status,
+                    last_calculated_at: row.last_calculated_at,
+                  };
+                  return acc;
+                }, {});
+                
+                data = data.map((row) => {
+                  const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+                  return {
+                    ...row,
+                    avg_views: avgViewEntry?.avg_views ?? null,
+                    avg_views_status: avgViewEntry?.status ?? null,
+                    avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+                  };
+                });
+              }
+            }
+            
+            // Apply client-side filters (search, owner, etc.) if needed
+            if (search) {
+              const encoded = search.toLowerCase();
+              data = data.filter((row) => {
+                const username = (row.username || '').toLowerCase();
+                const accountLink = (row.account_link || '').toLowerCase();
+                return username.includes(encoded) || accountLink.includes(encoded);
+              });
+              count = data.length;
+            }
+            if (owner) {
+              const ownerLower = owner.toLowerCase();
+              data = data.filter((row) => (row.owner_name || '').toLowerCase().includes(ownerLower));
+              count = data.length;
+            }
+            if (approved === 'yes') {
+              data = data.filter((row) => row.approved_vendor === true);
+              count = data.length;
+            } else if (approved === 'no') {
+              data = data.filter((row) => row.approved_vendor === false);
+              count = data.length;
+            }
+            if (paid === 'paid') {
+              data = data.filter((row) => row.paid === true);
+              count = data.length;
+            } else if (paid === 'unpaid') {
+              data = data.filter((row) => row.paid === false);
+              count = data.length;
+            }
+            if (matched === 'true') {
+              data = data.filter((row) => row.influencer_id !== null);
+              count = data.length;
+            } else if (matched === 'false') {
+              data = data.filter((row) => row.influencer_id === null);
+              count = data.length;
+            }
+            if (dateFrom) {
+              data = data.filter((row) => row.date_paid && row.date_paid >= dateFrom);
+              count = data.length;
+            }
+            if (dateTo) {
+              data = data.filter((row) => row.date_paid && row.date_paid <= dateTo);
+              count = data.length;
+            }
+          } else {
+            count = 0;
+            data = [];
+          }
         }
       } catch (rpcErr: any) {
         console.error('RPC error:', rpcErr);

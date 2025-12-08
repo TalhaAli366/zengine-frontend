@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Users, Search, Filter, X, Trash2, ChevronLeft, ChevronRight, MapPin, BarChart3, TrendingUp, CalendarDays, DollarSign, Edit2, ChevronUp, ChevronDown } from 'lucide-react';
 import { detectRegion } from '@/lib/api';
@@ -233,35 +233,37 @@ export default function InfluencersPage() {
     }
   }, []);
 
-  // Clear stale selections when influencers load
+  // Clear stale selections when filters change (not when pages change)
+  // Store previous filter values to detect filter changes
+  const prevFiltersRef = useRef<string>('');
   useEffect(() => {
-    if (!loadingInfluencers && allInfluencers.length === 0 && selectedInfluencerIds.length > 0) {
-      // No influencers in DB but have selections - clear them
-      handleClearSelection();
-    } else if (!loadingInfluencers && allInfluencers.length > 0 && selectedInfluencerIds.length > 0) {
-      // Filter out selections that no longer exist in current view
-      const currentIds = new Set(allInfluencers.map(inf => inf.id));
-      const validIds = selectedInfluencerIds.filter(id => currentIds.has(id));
+    // Create a filter signature to detect filter changes
+    const filterSignature = JSON.stringify({
+      search: appliedSearchQuery,
+      campaign: appliedSelectedCampaign,
+      minFollowers: appliedMinFollowers,
+      maxFollowers: appliedMaxFollowers,
+      minEngagementRate: appliedMinEngagementRate,
+      maxEngagementRate: appliedMaxEngagementRate,
+      minAvgViews: appliedMinAvgViews,
+      maxAvgViews: appliedMaxAvgViews,
+      hashtag: appliedSelectedHashtag,
+      sound: appliedSelectedSound,
+      reachedOut: appliedReachedOutFilter,
+      onlyWithEmail: appliedOnlyWithEmail,
+    });
 
-      if (validIds.length !== selectedInfluencerIds.length) {
-        // Some selections are stale - update
-        setSelectedInfluencerIds(validIds);
-        const newDetails: Record<string, OutreachSelectionInfluencer> = {};
-        validIds.forEach(id => {
-          if (selectedInfluencerDetails[id]) {
-            newDetails[id] = selectedInfluencerDetails[id];
-          }
-        });
-        setSelectedInfluencerDetails(newDetails);
-
-        if (validIds.length === 0) {
-          window.localStorage.removeItem('outreachSelection');
-        } else {
-          window.localStorage.setItem('outreachSelection', JSON.stringify(Object.values(newDetails)));
-        }
-      }
+    // Only filter selections when filters actually change (not on initial load or page change)
+    if (prevFiltersRef.current && prevFiltersRef.current !== filterSignature && !loadingInfluencers && selectedInfluencerIds.length > 0) {
+      // Filters changed - validate selections against current filtered results
+      // Note: We can't validate against allInfluencers because it only contains current page
+      // Instead, we'll keep all selections and let the API validate when sending to outreach
+      // Or we could fetch all matching IDs, but that's expensive. For now, keep selections.
+      console.log('[SELECTION] Filters changed, keeping existing selections');
     }
-  }, [loadingInfluencers, allInfluencers]);
+
+    prevFiltersRef.current = filterSignature;
+  }, [loadingInfluencers, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail, selectedInfluencerIds.length]);
 
   // Sync influencers state when allInfluencers changes (from API response)
   useEffect(() => {
@@ -414,20 +416,32 @@ export default function InfluencersPage() {
   const toggleInfluencerSelection = (influencer: Influencer) => {
     setSelectedInfluencerIds(prev => {
       const exists = prev.includes(influencer.id);
-      const next = exists ? prev.filter(id => id !== influencer.id) : [...prev, influencer.id];
-      return next;
+      return exists ? prev.filter(id => id !== influencer.id) : [...prev, influencer.id];
     });
 
     setSelectedInfluencerDetails(prev => {
       const exists = !!prev[influencer.id];
-      if (exists) {
-        const { [influencer.id]: _, ...rest } = prev;
-        return rest;
+      const updated = exists
+        ? (() => {
+            const { [influencer.id]: _, ...rest } = prev;
+            return rest;
+          })()
+        : {
+            ...prev,
+            [influencer.id]: buildSelectionPayload(influencer),
+          };
+      
+      // Sync to localStorage when selections change
+      if (typeof window !== 'undefined') {
+        const detailsArray = Object.values(updated);
+        if (detailsArray.length === 0) {
+          window.localStorage.removeItem('outreachSelection');
+        } else {
+          window.localStorage.setItem('outreachSelection', JSON.stringify(detailsArray));
+        }
       }
-      return {
-        ...prev,
-        [influencer.id]: buildSelectionPayload(influencer),
-      };
+      
+      return updated;
     });
   };
 
@@ -442,6 +456,17 @@ export default function InfluencersPage() {
         pageIds.forEach(id => {
           delete updated[id];
         });
+        
+        // Sync to localStorage
+        if (typeof window !== 'undefined') {
+          const detailsArray = Object.values(updated);
+          if (detailsArray.length === 0) {
+            window.localStorage.removeItem('outreachSelection');
+          } else {
+            window.localStorage.setItem('outreachSelection', JSON.stringify(detailsArray));
+          }
+        }
+        
         return updated;
       });
     } else {
@@ -451,6 +476,12 @@ export default function InfluencersPage() {
         influencers.forEach(inf => {
           updated[inf.id] = buildSelectionPayload(inf);
         });
+        
+        // Sync to localStorage
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('outreachSelection', JSON.stringify(Object.values(updated)));
+        }
+        
         return updated;
       });
     }
