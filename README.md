@@ -12,7 +12,7 @@ A modern, professional authentication system and dashboard for the TikTok Influe
   - Session management with Supabase Auth  
 
 - ✅ **Professional UI/UX**
-  - Beautiful gradient branding section
+  - Beautiful gradient branding section 
   - Responsive design (mobile-first)
   - Loading states and error handling 
   - Toast notifications
