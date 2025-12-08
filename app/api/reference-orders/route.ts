@@ -202,7 +202,7 @@ export async function GET(request: NextRequest) {
           .order('price_per_video', { ascending: false, nullsFirst: false })
           .order(sortColumn, { ascending, nullsFirst: false });
       } else {
-        dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
+      dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
       }
       
       // Fetch only the records needed for current page
@@ -1459,7 +1459,7 @@ export async function GET(request: NextRequest) {
             .order('price_per_video', { ascending: false, nullsFirst: false })
             .order(sortColumn, { ascending, nullsFirst: false });
         } else {
-          baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
+        baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
         }
         
         // Fetch only the records needed for current page

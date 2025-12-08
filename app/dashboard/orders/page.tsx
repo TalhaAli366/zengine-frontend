@@ -101,6 +101,113 @@ const formatDateForInput = (value?: string | null) => {
   return value.split('T')[0];
 };
 
+const formatTimestampInUKTime = (isoString: string): string => {
+  // Parse the UTC timestamp and convert to UK timezone
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString;
+  
+  // Format in UK timezone (Europe/London)
+  // Use Intl.DateTimeFormat to properly handle timezone conversion
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  
+  const parts = formatter.formatToParts(date);
+  const year = parts.find(p => p.type === 'year')?.value || '';
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const hour = parts.find(p => p.type === 'hour')?.value || '';
+  const minute = parts.find(p => p.type === 'minute')?.value || '';
+  const second = parts.find(p => p.type === 'second')?.value || '';
+  
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+};
+
+// Convert UTC ISO string to UK time for datetime-local input (YYYY-MM-DDTHH:mm format)
+const utcToUKDateTimeLocal = (isoString: string): string => {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  
+  // Format in UK timezone for datetime-local input
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  
+  // Use formatToParts to get individual components
+  const parts = formatter.formatToParts(date);
+  const year = parts.find(p => p.type === 'year')?.value || '';
+  const month = parts.find(p => p.type === 'month')?.value || '';
+  const day = parts.find(p => p.type === 'day')?.value || '';
+  const hour = parts.find(p => p.type === 'hour')?.value || '';
+  const minute = parts.find(p => p.type === 'minute')?.value || '';
+  
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+
+// Convert UK time from datetime-local input to UTC ISO string
+const ukDateTimeLocalToUTC = (ukDateTimeLocal: string): string => {
+  // Parse the UK time from datetime-local format (YYYY-MM-DDTHH:mm)
+  const [datePart, timePart] = ukDateTimeLocal.trim().split('T');
+  if (!datePart || !timePart) {
+    throw new Error('Invalid datetime format');
+  }
+  
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute] = timePart.split(':').map(Number);
+  
+  // Method: Binary search for the UTC time that produces the target UK time
+  // UK timezone offset is typically 0 (GMT) or +1 (BST), but can vary
+  // We'll test UTC times around the target and find which one produces the correct UK time
+  
+  const targetHour = hour;
+  const targetMinute = minute;
+  
+  // Start with UTC time equal to UK time (assuming GMT)
+  let bestUTC = new Date(Date.UTC(year, month - 1, day, targetHour, targetMinute, 0));
+  let minDiff = Infinity;
+  
+  // Try UTC times from -2 to +2 hours offset to find the one that produces target UK time
+  for (let offsetHours = -2; offsetHours <= 2; offsetHours++) {
+    const testUTC = new Date(Date.UTC(year, month - 1, day, targetHour - offsetHours, targetMinute, 0));
+    const testUKTime = testUTC.toLocaleString('en-GB', {
+      timeZone: 'Europe/London',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    
+    // Parse UK time string (format: "DD/MM/YYYY, HH:mm" or "DD/MM/YYYY HH:mm")
+    const ukMatch = testUKTime.match(/(\d+)\/(\d+)\/(\d+)[,\s]+(\d+):(\d+)/);
+    if (ukMatch) {
+      const [, ukDay, ukMonth, ukYear, ukHour, ukMinute] = ukMatch.map(Number);
+      // Check if this matches our target
+      if (ukYear === year && ukMonth === month && ukDay === day && 
+          ukHour === targetHour && ukMinute === targetMinute) {
+        return testUTC.toISOString();
+      }
+    }
+  }
+  
+  // Fallback: return the best guess (assuming GMT)
+  return bestUTC.toISOString();
+};
+
 const calculateVideoLinksCompletion = (videoLinks?: string | null, videoCount?: number | null): number | null => {
   if (!videoCount || videoCount === 0) return null;
   
@@ -230,6 +337,10 @@ export default function ReferenceOrdersPage() {
   const [sheetUrl, setSheetUrl] = useState('');
   const [syncingSheet, setSyncingSheet] = useState(false);
   const [lastSheetSyncAt, setLastSheetSyncAt] = useState<string | null>(null);
+  const [editSyncTimestampModalOpen, setEditSyncTimestampModalOpen] = useState(false);
+  const [editingSyncTimestamp, setEditingSyncTimestamp] = useState(false);
+  const [syncTimestampInput, setSyncTimestampInput] = useState('');
+  const [syncTimestampError, setSyncTimestampError] = useState<string | null>(null);
 
   // Pending filters (what user is typing)
   const [search, setSearch] = useState('');
@@ -278,7 +389,7 @@ export default function ReferenceOrdersPage() {
     const start = (songPage - 1) * SONGS_PER_PAGE;
     return filteredSongs.slice(start, start + SONGS_PER_PAGE);
   }, [filteredSongs, songPage]);
-  const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [banner, setBanner] = useState<{ type: 'success' | 'error' | 'warning' | 'info'; message: string } | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
@@ -497,6 +608,76 @@ export default function ReferenceOrdersPage() {
     }
   };
 
+  const loadSheetSyncState = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/v1/reference-orders/sheet-sync-state`);
+      if (!response.ok) throw new Error('Failed to load sync state');
+      const data = await response.json();
+      setLastSheetSyncAt(data.last_synced_at || null);
+      if (data.sheet_url) {
+        setSheetUrl(data.sheet_url);
+      }
+    } catch (err) {
+      console.error('Error loading sheet sync state:', err);
+    }
+  };
+
+  const handleUpdateSyncTimestamp = async () => {
+    if (!syncTimestampInput.trim()) {
+      setSyncTimestampError('Timestamp is required');
+      return;
+    }
+
+    setEditingSyncTimestamp(true);
+    setSyncTimestampError(null);
+
+    try {
+      // Convert UK time from datetime-local input to UTC ISO string
+      const isoString = ukDateTimeLocalToUTC(syncTimestampInput.trim());
+
+      const response = await fetch(`${API_URL}/api/v1/reference-orders/sheet-sync-state`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ last_synced_at: isoString }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || 'Failed to update sync timestamp');
+      }
+
+      setLastSheetSyncAt(data.last_synced_at);
+      setEditSyncTimestampModalOpen(false);
+      setSyncTimestampInput('');
+      setBanner({ type: 'success', message: 'Sync timestamp updated successfully' });
+    } catch (err: any) {
+      setSyncTimestampError(err.message || 'Failed to update sync timestamp');
+    } finally {
+      setEditingSyncTimestamp(false);
+    }
+  };
+
+  const openEditSyncTimestampModal = () => {
+    setSyncTimestampError(null);
+    // Pre-fill with current timestamp converted to UK time
+    if (lastSheetSyncAt) {
+      // Convert UTC timestamp to UK time for datetime-local input
+      setSyncTimestampInput(utcToUKDateTimeLocal(lastSheetSyncAt));
+    } else {
+      // Default to current UK time
+      const now = new Date();
+      setSyncTimestampInput(utcToUKDateTimeLocal(now.toISOString()));
+    }
+    setEditSyncTimestampModalOpen(true);
+  };
+
+  const closeEditSyncTimestampModal = () => {
+    if (editingSyncTimestamp) return;
+    setEditSyncTimestampModalOpen(false);
+    setSyncTimestampInput('');
+    setSyncTimestampError(null);
+  };
+
   // Apply filters function - copies pending filters to applied filters
   const applyFilters = () => {
     setAppliedSearch(search);
@@ -516,6 +697,10 @@ export default function ReferenceOrdersPage() {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appliedSearch, appliedOwnerFilter, appliedApprovedFilter, appliedPaidFilter, appliedMatchedFilter, appliedDateFrom, appliedDateTo, appliedMinAvgViews, appliedMaxAvgViews, appliedUniqueCreators, sortBy, sortOrder, currentPage]);
+
+  useEffect(() => {
+    loadSheetSyncState();
+  }, []);
 
   // Scroll position detection for scroll buttons
   useEffect(() => {
@@ -652,11 +837,21 @@ export default function ReferenceOrdersPage() {
       if (data.last_synced_at) {
         setLastSheetSyncAt(data.last_synced_at);
       }
+      
+      // Use backend message if available, otherwise construct one
+      const message = data.message || `Processed ${data.imported ?? 0} new orders from sheet`;
+      
+      // Determine banner type based on results
+      const bannerType = data.imported === 0 && data.skipped > 0 ? 'warning' : 
+                        data.imported === 0 ? 'info' : 'success';
+      
       setBanner({
-        type: 'success',
-        message: `Synced ${data.imported ?? 0} new orders from sheet`,
+        type: bannerType,
+        message: message,
       });
       await loadOrders();
+      // Reload sync state to ensure UI is up to date
+      await loadSheetSyncState();
     } catch (err: any) {
       setBanner({ type: 'error', message: err.message || 'Failed to sync from sheet' });
     } finally {
@@ -1334,12 +1529,27 @@ export default function ReferenceOrdersPage() {
                 added after the last sync will be imported.
               </p>
             </div>
-            {lastSheetSyncAt && (
-              <p className="text-xs text-gray-500">
-                Last sync:{' '}
-                {new Date(lastSheetSyncAt).toLocaleString()}
-              </p>
-            )}
+            <div className="flex items-center gap-2">
+              {lastSheetSyncAt ? (
+                <>
+                  <p className="text-xs text-gray-500">
+                    Last sync:{' '}
+                    <span className="font-medium">{formatTimestampInUKTime(lastSheetSyncAt)}</span>
+                    <span className="text-gray-400 ml-1">(UK)</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openEditSyncTimestampModal}
+                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                    title="Edit sync timestamp"
+                  >
+                    Edit
+                  </button>
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">No sync recorded yet</p>
+              )}
+            </div>
           </div>
           <div className="flex flex-wrap gap-3 items-center">
             <input
@@ -1408,23 +1618,40 @@ export default function ReferenceOrdersPage() {
 
         {banner && (
           <div
-            className={`mb-4 p-4 border rounded-lg flex items-start gap-3 ${banner.type === 'success'
-              ? 'bg-blue-50 border-blue-200 text-blue-900'
-              : 'bg-red-50 border-red-200 text-red-900'
-              }`}
+            className={`mb-4 p-4 border rounded-lg flex items-start gap-3 ${
+              banner.type === 'success' ? 'bg-blue-50 border-blue-200 text-blue-900' :
+              banner.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-900' :
+              banner.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-900' :
+              'bg-red-50 border-red-200 text-red-900'
+            }`}
           >
-            <CheckCircle2
-              className={`w-5 h-5 flex-shrink-0 mt-0.5 ${banner.type === 'success' ? 'text-blue-600' : 'text-red-600'
+            {banner.type === 'error' ? (
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
+            ) : (
+              <CheckCircle2
+                className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                  banner.type === 'success' ? 'text-blue-600' : 
+                  banner.type === 'warning' ? 'text-yellow-600' :
+                  'text-blue-600'
                 }`}
-            />
+              />
+            )}
             <div className="flex-1">
               <p className="font-semibold">
-                {banner.type === 'success' ? 'Success' : 'Something went wrong'}
+                {banner.type === 'success' ? 'Success' : 
+                 banner.type === 'warning' ? 'Warning' :
+                 banner.type === 'info' ? 'Info' :
+                 'Something went wrong'}
               </p>
               <p className="text-sm">{banner.message}</p>
             </div>
             <button
-              className={`${banner.type === 'success' ? 'text-blue-500 hover:text-blue-700' : 'text-red-500 hover:text-red-700'}`}
+              className={`${
+                banner.type === 'success' ? 'text-blue-500 hover:text-blue-700' :
+                banner.type === 'warning' ? 'text-yellow-500 hover:text-yellow-700' :
+                banner.type === 'info' ? 'text-blue-500 hover:text-blue-700' :
+                'text-red-500 hover:text-red-700'
+              }`}
               onClick={() => setBanner(null)}
               aria-label="Dismiss message"
             >
@@ -2744,6 +2971,89 @@ export default function ReferenceOrdersPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Sync Timestamp Modal */}
+      {editSyncTimestampModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Edit Sync Timestamp</h2>
+                <button
+                  type="button"
+                  onClick={closeEditSyncTimestampModal}
+                  className="text-gray-400 hover:text-gray-600"
+                  disabled={editingSyncTimestamp}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-sm text-gray-600 mb-4">
+                Update the last sync timestamp. Only rows with <code className="px-1 py-0.5 bg-gray-100 rounded text-xs">created_at</code> after this timestamp will be imported on the next sync.
+              </p>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUpdateSyncTimestamp();
+                }}
+              >
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Last Sync Timestamp
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={syncTimestampInput}
+                    onChange={(e) => setSyncTimestampInput(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Format: YYYY-MM-DD HH:MM (UK time - will be converted to UTC for storage)
+                  </p>
+                </div>
+
+                {syncTimestampError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-700">{syncTimestampError}</p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeEditSyncTimestampModal}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                    disabled={editingSyncTimestamp}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editingSyncTimestamp}
+                    className="inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {editingSyncTimestamp ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        Update Timestamp
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

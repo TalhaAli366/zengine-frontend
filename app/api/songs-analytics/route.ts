@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         });
         
         if (response.ok) {
-          console.log('Song analytics cache refreshed successfully');
+        console.log('Song analytics cache refreshed successfully');
         } else {
           console.error('Failed to refresh cache:', await response.text());
         }
@@ -119,19 +119,19 @@ export async function POST() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      
+    
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to refresh cache');
       }
       
       const result = await response.json();
-      console.log('Song analytics cache refreshed successfully');
-      
-      return Response.json({ 
-        success: true, 
+    console.log('Song analytics cache refreshed successfully');
+
+    return Response.json({ 
+      success: true, 
         message: result.message || 'Song analytics cache refreshed successfully'
-      });
+    });
     } catch (err: any) {
       console.error('Refresh cache error:', err);
       return Response.json({ 
