@@ -86,8 +86,6 @@ export default function OutreachPage() {
   // Outreach logs
   const [outreachLogs, setOutreachLogs] = useState<OutreachLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
-  const [logFilterCampaign, setLogFilterCampaign] = useState('');
-  const [logFilterStatus, setLogFilterStatus] = useState('');
   const [zohoStatus, setZohoStatus] = useState<ZohoStatus | null>(null);
   const [zohoForm, setZohoForm] = useState({
     clientId: '',
@@ -111,7 +109,7 @@ export default function OutreachPage() {
     if (activeTab === 'logs') {
       loadOutreachLogs();
     }
-  }, [activeTab, logFilterCampaign, logFilterStatus]);
+  }, [activeTab]);
 
   useEffect(() => {
     const zohoParam = searchParams?.get('zoho');
@@ -391,8 +389,6 @@ export default function OutreachPage() {
     setLoadingLogs(true);
     try {
       const params = new URLSearchParams();
-      if (logFilterCampaign) params.append('campaign_id', logFilterCampaign);
-      if (logFilterStatus) params.append('status', logFilterStatus);
       params.append('limit', '100');
 
       const response = await fetch(`${API_URL}/api/v1/outreach/logs?${params.toString()}`);
@@ -781,40 +777,19 @@ export default function OutreachPage() {
 
             {activeTab === 'logs' && (
               <div className="space-y-6">
-                {/* Filters */}
-                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-gray-900">Filter Logs</h3>
-                    <button
-                      onClick={loadOutreachLogs}
-                      disabled={loadingLogs}
-                      className="px-3 py-1.5 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                    >
-                      <svg className={`w-4 h-4 ${loadingLogs ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      Refresh
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Status
-                      </label>
-                      <select
-                        value={logFilterStatus}
-                        onChange={(e) => setLogFilterStatus(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                      >
-                        <option value="">All Statuses</option>
-                        <option value="sent">Sent</option>
-                        <option value="failed">Failed</option>
-                        <option value="pending">Pending</option>
-                        <option value="delivered">Delivered</option>
-                        <option value="bounced">Bounced</option>
-                      </select>
-                    </div>
-                  </div>
+                {/* Refresh Button */}
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-semibold text-gray-900">Outreach History</h3>
+                  <button
+                    onClick={loadOutreachLogs}
+                    disabled={loadingLogs}
+                    className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    <svg className={`w-4 h-4 ${loadingLogs ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Refresh
+                  </button>
                 </div>
 
                 {/* Logs Table */}
@@ -868,9 +843,7 @@ export default function OutreachPage() {
                   <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
                     <p className="text-gray-500 mb-2">No outreach logs found</p>
                     <p className="text-sm text-gray-400">
-                      {logFilterStatus
-                        ? 'Try adjusting your filters'
-                        : 'Send emails to see logs here'}
+                      Send emails to see logs here
                     </p>
                   </div>
                 )}
