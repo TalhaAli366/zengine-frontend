@@ -14,7 +14,7 @@ A modern, professional authentication system and dashboard for the TikTok Influe
 - ✅ **Professional UI/UX**
   - Beautiful gradient branding section 
   - Responsive design (mobile-first)
-  - Loading states and error handling 
+  - Loading states and error handling  
   - Toast notifications
   - Modern glassmorphism effects
 
