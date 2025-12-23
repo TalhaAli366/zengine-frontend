@@ -84,7 +84,7 @@ export default function InfluencersPage() {
   const [selectedSound, setSelectedSound] = useState('');
   const [reachedOutFilter, setReachedOutFilter] = useState('');
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
-  
+
   // Applied filter states (what's actually being used for queries)
   const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
   const [appliedSelectedCampaign, setAppliedSelectedCampaign] = useState('');
@@ -423,14 +423,14 @@ export default function InfluencersPage() {
       const exists = !!prev[influencer.id];
       const updated = exists
         ? (() => {
-            const { [influencer.id]: _, ...rest } = prev;
-            return rest;
-          })()
+          const { [influencer.id]: _, ...rest } = prev;
+          return rest;
+        })()
         : {
-            ...prev,
-            [influencer.id]: buildSelectionPayload(influencer),
-          };
-      
+          ...prev,
+          [influencer.id]: buildSelectionPayload(influencer),
+        };
+
       // Sync to localStorage when selections change
       if (typeof window !== 'undefined') {
         const detailsArray = Object.values(updated);
@@ -440,7 +440,7 @@ export default function InfluencersPage() {
           window.localStorage.setItem('outreachSelection', JSON.stringify(detailsArray));
         }
       }
-      
+
       return updated;
     });
   };
@@ -456,7 +456,7 @@ export default function InfluencersPage() {
         pageIds.forEach(id => {
           delete updated[id];
         });
-        
+
         // Sync to localStorage
         if (typeof window !== 'undefined') {
           const detailsArray = Object.values(updated);
@@ -466,7 +466,7 @@ export default function InfluencersPage() {
             window.localStorage.setItem('outreachSelection', JSON.stringify(detailsArray));
           }
         }
-        
+
         return updated;
       });
     } else {
@@ -476,12 +476,12 @@ export default function InfluencersPage() {
         influencers.forEach(inf => {
           updated[inf.id] = buildSelectionPayload(inf);
         });
-        
+
         // Sync to localStorage
         if (typeof window !== 'undefined') {
           window.localStorage.setItem('outreachSelection', JSON.stringify(Object.values(updated)));
         }
-        
+
         return updated;
       });
     }
@@ -506,7 +506,7 @@ export default function InfluencersPage() {
         // Merge with existing selection in localStorage instead of replacing
         const existingSelectionStr = window.localStorage.getItem('outreachSelection');
         let existingSelection: OutreachSelectionInfluencer[] = [];
-        
+
         if (existingSelectionStr) {
           try {
             const parsed = JSON.parse(existingSelectionStr);
@@ -517,14 +517,14 @@ export default function InfluencersPage() {
             console.warn('Failed to parse existing selection, starting fresh:', e);
           }
         }
-        
+
         // Merge: deduplicate by email (most reliable identifier)
         const existingEmails = new Set(existingSelection.map(inf => inf.email?.toLowerCase()).filter(Boolean));
         const newItems = payload.filter(inf => {
           const emailLower = inf.email?.toLowerCase();
           return emailLower && !existingEmails.has(emailLower);
         });
-        
+
         const mergedSelection = [...existingSelection, ...newItems];
         window.localStorage.setItem('outreachSelection', JSON.stringify(mergedSelection));
       }
@@ -593,11 +593,22 @@ export default function InfluencersPage() {
 
     try {
       const params = new URLSearchParams();
-      if (minFollowers) params.append('min_followers', minFollowers);
-      if (maxFollowers) params.append('max_followers', maxFollowers);
+      if (appliedSelectedCampaign) params.append('campaign', appliedSelectedCampaign);
+      if (appliedSearchQuery) params.append('search', appliedSearchQuery);
+      if (appliedMinFollowers) params.append('min_followers', appliedMinFollowers);
+      if (appliedMaxFollowers) params.append('max_followers', appliedMaxFollowers);
+      if (appliedMinEngagementRate) params.append('min_engagement_rate', appliedMinEngagementRate);
+      if (appliedMaxEngagementRate) params.append('max_engagement_rate', appliedMaxEngagementRate);
+      if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
+      if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
+      if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
+      if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
+      if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
+      if (appliedOnlyWithEmail) params.append('has_email', 'true');
 
-      const endpoint = format === 'csv' ? 'export/csv' : 'export/excel';
-      const response = await fetch(`${API_URL}/api/v1/import-export/${endpoint}?${params.toString()}`);
+      params.append('format', format);
+      const endpoint = '/api/influencers/export';
+      const response = await fetch(`${endpoint}?${params.toString()}`);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -608,7 +619,7 @@ export default function InfluencersPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `influencers.${format === 'csv' ? 'csv' : 'xlsx'}`;
+      a.download = `influencers_${new Date().toISOString().split('T')[0]}.${format === 'csv' ? 'csv' : 'xlsx'}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -773,8 +784,8 @@ export default function InfluencersPage() {
               onClick={handleSendToOutreach}
               disabled={!hasSelection}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasSelection
-                  ? 'text-white bg-primary-600 hover:bg-primary-700'
-                  : 'text-gray-500 bg-gray-200 cursor-not-allowed'
+                ? 'text-white bg-primary-600 hover:bg-primary-700'
+                : 'text-gray-500 bg-gray-200 cursor-not-allowed'
                 }`}
             >
               Send to Outreach
@@ -813,8 +824,8 @@ export default function InfluencersPage() {
         <button
           onClick={() => setActiveTab('list')}
           className={`px-4 py-2 font-medium border-b-2 transition-colors ${activeTab === 'list'
-              ? 'border-primary-600 text-primary-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
+            ? 'border-primary-600 text-primary-600'
+            : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
         >
           Influencer List ({influencers.length})
@@ -822,8 +833,8 @@ export default function InfluencersPage() {
         <button
           onClick={() => setActiveTab('visualizations')}
           className={`px-4 py-2 font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'visualizations'
-              ? 'border-primary-600 text-primary-600'
-              : 'border-transparent text-gray-600 hover:text-gray-900'
+            ? 'border-primary-600 text-primary-600'
+            : 'border-transparent text-gray-600 hover:text-gray-900'
             }`}
         >
           <BarChart3 className="w-4 h-4" />
@@ -1511,8 +1522,8 @@ export default function InfluencersPage() {
                             key={pageNum}
                             onClick={() => handlePageChange(pageNum)}
                             className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${currentPage === pageNum
-                                ? 'bg-primary-600 text-white'
-                                : 'text-gray-700 hover:bg-gray-100'
+                              ? 'bg-primary-600 text-white'
+                              : 'text-gray-700 hover:bg-gray-100'
                               }`}
                           >
                             {pageNum}
