@@ -5,7 +5,7 @@ A modern, professional authentication system and dashboard for the TikTok Influe
 ## Features  
  
 - ✅ **Modern Authentication System** 
-  - Login with email/password
+  - Login with email/password 
   - Sign up with email verification 
   - Forgot password / Password reset 
   - Protected routes with middleware  
