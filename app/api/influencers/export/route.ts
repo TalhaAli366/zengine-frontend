@@ -56,7 +56,16 @@ export async function GET(request: NextRequest) {
         const soundId = searchParams.get('sound_id');
         const reachedOut = searchParams.get('reached_out');
         const hasEmail = searchParams.get('has_email');
+        const onlyPersonalEmail = searchParams.get('only_personal_email');
         const country = searchParams.get('country');
+
+        // Personal email domains list (non-business)
+        const personalEmailDomains = [
+            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+            'aol.com', 'mail.com', 'protonmail.com', 'yandex.com', 'mail.ru',
+            'live.com', 'msn.com', 'gmx.com', 'zoho.com', 'inbox.com',
+            'rediffmail.com', 'qq.com', '163.com', 'sina.com', 'naver.com'
+        ];
 
         console.log(`[INFLUENCERS EXPORT] Starting ${format} export with filters.`);
 
@@ -169,6 +178,15 @@ export async function GET(request: NextRequest) {
                 return modQuery;
             });
             allInfluencers = data;
+        }
+
+        // Apply personal email filter in-memory (Supabase can't do complex domain matching)
+        if (onlyPersonalEmail === 'true') {
+            allInfluencers = allInfluencers.filter((inf: any) => {
+                if (!inf.email) return false;
+                const domain = inf.email.toLowerCase().split('@')[1];
+                return domain && personalEmailDomains.includes(domain);
+            });
         }
 
         if (allInfluencers.length === 0) {

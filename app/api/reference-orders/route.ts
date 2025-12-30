@@ -42,7 +42,7 @@ const parseBoolean = (value: any) => {
 export async function GET(request: NextRequest) {
   try {
     const supabase = createServerComponentClient({ cookies });
-    
+
     // For unique creators, use a more efficient database-level approach
     // to avoid loading all 41k+ records into memory
     const searchParams = request.nextUrl.searchParams;
@@ -56,10 +56,12 @@ export async function GET(request: NextRequest) {
     const dateTo = searchParams.get('date_to');
     const minAvgViews = searchParams.get('min_avg_views');
     const maxAvgViews = searchParams.get('max_avg_views');
+    const minPricePerVideo = searchParams.get('min_price_per_video');
+    const maxPricePerVideo = searchParams.get('max_price_per_video');
     const uniqueCreators = searchParams.get('unique_creators') === 'true';
     const sortBy = searchParams.get('sort_by') || 'date_paid';
     const sortOrder = searchParams.get('sort_order') || 'desc';
-    
+
     console.log(`[API REQUEST] URL: ${request.nextUrl.toString()}`);
     console.log(`[API REQUEST] sort_by: ${sortBy}, sort_order: ${sortOrder}, uniqueCreators: ${uniqueCreators}`);
 
@@ -127,6 +129,12 @@ export async function GET(request: NextRequest) {
     if (dateTo) {
       query = query.lte('date_paid', dateTo);
     }
+    if (minPricePerVideo) {
+      query = query.gte('price_per_video', parseFloat(minPricePerVideo));
+    }
+    if (maxPricePerVideo) {
+      query = query.lte('price_per_video', parseFloat(maxPricePerVideo));
+    }
 
     // Apply sorting - handle avg_views separately (requires join), others can use database sorting
     const validSortColumns = ['date_paid', 'owner_name', 'username', 'price_per_video', 'final_price'];
@@ -140,7 +148,7 @@ export async function GET(request: NextRequest) {
     if ((sortBy === 'price_per_video' || sortBy === 'owner_name') && !uniqueCreators && !minAvgViews && !maxAvgViews) {
       // Use efficient database sorting - only fetch what we need for current page
       console.log(`[DATABASE SORT] Using database sorting for ${sortBy}, ascending: ${ascending}`);
-      
+
       // Rebuild query without default order, then apply custom sort
       let dbSortQuery = supabase
         .from('reference_orders')
@@ -164,7 +172,7 @@ export async function GET(request: NextRequest) {
           video_links,
           created_at
         `, { count: 'exact' });
-      
+
       // Reapply all filters
       if (search) {
         const encoded = `%${search}%`;
@@ -194,7 +202,13 @@ export async function GET(request: NextRequest) {
       if (dateTo) {
         dbSortQuery = dbSortQuery.lte('date_paid', dateTo);
       }
-      
+      if (minPricePerVideo) {
+        dbSortQuery = dbSortQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+      }
+      if (maxPricePerVideo) {
+        dbSortQuery = dbSortQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+      }
+
       // Apply custom sort
       // When sorting by date_paid, prioritize non-zero price_per_video first
       if (sortColumn === 'date_paid') {
@@ -202,16 +216,16 @@ export async function GET(request: NextRequest) {
           .order('price_per_video', { ascending: false, nullsFirst: false })
           .order(sortColumn, { ascending, nullsFirst: false });
       } else {
-      dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
+        dbSortQuery = dbSortQuery.order(sortColumn, { ascending, nullsFirst: false });
       }
-      
+
       // Fetch only the records needed for current page
       const { data: queryData, error: queryError, count: queryCount } = await dbSortQuery.range(offset, offset + limit - 1);
       if (queryError) {
         console.error(`[DATABASE SORT ERROR]`, queryError);
         throw queryError;
       }
-      
+
       console.log(`[DATABASE SORT] Fetched ${queryData?.length || 0} records, total count: ${queryCount || 0}`);
 
       data = queryData || [];
@@ -262,7 +276,7 @@ export async function GET(request: NextRequest) {
     // For avg_views, we need to fetch more data and sort client-side (no FK relationship for join)
     else if (sortBy === 'avg_views' && !uniqueCreators && !minAvgViews && !maxAvgViews) {
       console.log(`[AVG_VIEWS SORT] Using client-side sorting for avg_views`);
-      
+
       // Fetch a reasonable amount of data (up to 1000 records) to sort
       const maxRecordsToFetch = 1000;
       let dbSortQuery = supabase
@@ -287,7 +301,7 @@ export async function GET(request: NextRequest) {
           video_links,
           created_at
         `, { count: 'exact' });
-      
+
       // Reapply all filters
       if (search) {
         const encoded = `%${search}%`;
@@ -317,14 +331,20 @@ export async function GET(request: NextRequest) {
       if (dateTo) {
         dbSortQuery = dbSortQuery.lte('date_paid', dateTo);
       }
-      
+      if (minPricePerVideo) {
+        dbSortQuery = dbSortQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+      }
+      if (maxPricePerVideo) {
+        dbSortQuery = dbSortQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+      }
+
       // Fetch records (up to maxRecordsToFetch) for sorting
       const { data: allData, error: queryError, count: queryCount } = await dbSortQuery.range(0, maxRecordsToFetch - 1);
       if (queryError) {
         console.error(`[AVG_VIEWS SORT ERROR]`, queryError);
         throw queryError;
       }
-      
+
       // Get all normalized usernames for avg_views enrichment
       const normalizedUsernames = Array.from(
         new Set((allData || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
@@ -353,7 +373,7 @@ export async function GET(request: NextRequest) {
           return acc;
         }, {} as typeof avgViewMap);
       }
-      
+
       // Enrich data with avg_views
       let enrichedData = (allData || []).map((row: any) => {
         const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
@@ -364,7 +384,7 @@ export async function GET(request: NextRequest) {
           avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
         };
       });
-      
+
       // Sort by avg_views
       enrichedData.sort((a: any, b: any) => {
         const aAvgViews = a.avg_views;
@@ -374,30 +394,32 @@ export async function GET(request: NextRequest) {
         if (bAvgViews === null) return -1;
         return ascending ? Number(aAvgViews) - Number(bAvgViews) : Number(bAvgViews) - Number(aAvgViews);
       });
-      
+
       // Update count
       count = queryCount || enrichedData.length;
-      
+
       // Apply pagination
       const paginationOffset = (page - 1) * limit;
       data = enrichedData.slice(paginationOffset, paginationOffset + limit);
-      
+
       console.log(`[AVG_VIEWS SORT] Fetched ${enrichedData.length} records, sorted, returning page ${page} (${data.length} records)`);
     }
     // If uniqueCreators is true, use the efficient database function
     else if (uniqueCreators) {
       try {
-        // CRITICAL: If avg_views filters are present, filter at database level FIRST
-        // before calling get_unique_reference_orders
+        // CRITICAL: If avg_views OR price_per_video filters are present, filter at database level FIRST
+        // before calling get_unique_reference_orders (can't use RPC for these filters)
         let matchingNormalizedUsernames: string[] | null = null;
-        
+        let skipRPC = false; // Flag to skip RPC and use manual fetching
+
+        // Handle avg_views filtering first (if present)
         if (minAvgViews || maxAvgViews) {
           console.log(`[UNIQUE CREATORS + AVG_VIEWS] Filtering avg_views at database level first`);
           // First, get normalized_usernames that match the avg_views filter
           let avgViewsQuery = supabase
             .from('reference_creator_avg_views')
             .select('normalized_username');
-          
+
           if (minAvgViews) {
             const minVal = parseFloat(minAvgViews);
             if (!isNaN(minVal)) {
@@ -410,25 +432,25 @@ export async function GET(request: NextRequest) {
               avgViewsQuery = avgViewsQuery.lte('avg_views', maxVal);
             }
           }
-          
+
           // Also filter out null avg_views
           avgViewsQuery = avgViewsQuery.not('avg_views', 'is', null);
-          
+
           // Fetch ALL matching usernames in batches (Supabase default limit is 1000)
           let allAvgViewsData: any[] = [];
           let avgViewsOffset = 0;
           const avgViewsBatchSize = 1000;
           let hasMoreAvgViews = true;
-          
+
           while (hasMoreAvgViews) {
             const { data: batchData, error: batchError } = await avgViewsQuery
               .range(avgViewsOffset, avgViewsOffset + avgViewsBatchSize - 1);
-            
+
             if (batchError) {
               console.error(`[AVG_VIEWS FILTER ERROR]`, batchError);
               throw batchError;
             }
-            
+
             if (batchData && batchData.length > 0) {
               allAvgViewsData = allAvgViewsData.concat(batchData);
               avgViewsOffset += avgViewsBatchSize;
@@ -437,10 +459,10 @@ export async function GET(request: NextRequest) {
               hasMoreAvgViews = false;
             }
           }
-          
+
           matchingNormalizedUsernames = allAvgViewsData.map((row) => row.normalized_username).filter(Boolean);
           console.log(`[UNIQUE CREATORS + AVG_VIEWS] Found ${matchingNormalizedUsernames.length} creators matching avg_views filter`);
-          
+
           // If no creators match, return empty result early
           if (matchingNormalizedUsernames.length === 0) {
             return Response.json({
@@ -464,146 +486,247 @@ export async function GET(request: NextRequest) {
               },
             });
           }
+          skipRPC = true;
         }
-        
-        // If we have avg_views filter, we need to fetch unique orders manually
-        // because get_unique_reference_orders doesn't support filtering by normalized_usernames
-        if (matchingNormalizedUsernames && matchingNormalizedUsernames.length > 0) {
-          console.log(`[UNIQUE CREATORS + AVG_VIEWS] Fetching unique orders for ${matchingNormalizedUsernames.length} creators`);
-          
-          // Split usernames into smaller chunks for parallel processing
-          // Use smaller chunks (50) to avoid URL length issues
-          const batchChunkSize = 50;
-          const usernameChunks: string[][] = [];
-          for (let i = 0; i < matchingNormalizedUsernames.length; i += batchChunkSize) {
-            usernameChunks.push(matchingNormalizedUsernames.slice(i, i + batchChunkSize));
-          }
-          
+
+        // If only price_per_video filters are present (no avg_views), we need to skip RPC
+        // and fetch all orders manually with price filter applied at database level
+        if ((minPricePerVideo || maxPricePerVideo) && !minAvgViews && !maxAvgViews) {
+          console.log(`[UNIQUE CREATORS + PRICE] Skipping RPC, will fetch all orders with price filter`);
+          skipRPC = true;
+        }
+
+        // If we have filters that require manual fetching, fetch unique orders manually
+        if (skipRPC) {
+          console.log(`[UNIQUE CREATORS + FILTERS] Fetching unique orders manually`);
+
           let allMatchingOrders: any[] = [];
-          
-          // Helper function to fetch orders for a single chunk
-          const fetchChunk = async (chunk: string[]): Promise<any[]> => {
-            try {
-              // Build query for this chunk
-              let chunkQuery = supabase
-                .from('reference_orders')
-                .select(`
-                  id,
-                  influencer_id,
-                  username,
-                  normalized_username,
-                  email,
-                  account_link,
-                  owner_name,
-                  approved_vendor,
-                  total_fee_per_import,
-                  price_usd,
-                  video_count,
-                  final_price,
-                  price_per_video,
-                  songs,
-                  paid,
-                  date_paid,
-                  video_links,
-                  created_at
-                `)
-                .in('normalized_username', chunk);
-              
-              // Apply all other filters to each chunk
-              if (search) {
-                const encoded = `%${search}%`;
-                chunkQuery = chunkQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
-              }
-              if (owner) {
-                chunkQuery = chunkQuery.ilike('owner_name', `%${owner}%`);
-              }
-              if (approved === 'yes') {
-                chunkQuery = chunkQuery.eq('approved_vendor', true);
-              } else if (approved === 'no') {
-                chunkQuery = chunkQuery.eq('approved_vendor', false);
-              }
-              if (paid === 'paid') {
-                chunkQuery = chunkQuery.eq('paid', true);
-              } else if (paid === 'unpaid') {
-                chunkQuery = chunkQuery.eq('paid', false);
-              }
-              if (matched === 'true') {
-                chunkQuery = chunkQuery.not('influencer_id', 'is', null);
-              } else if (matched === 'false') {
-                chunkQuery = chunkQuery.is('influencer_id', null);
-              }
-              if (dateFrom) {
-                chunkQuery = chunkQuery.gte('date_paid', dateFrom);
-              }
-              if (dateTo) {
-                chunkQuery = chunkQuery.lte('date_paid', dateTo);
-              }
-              
-              // Fetch all records from this chunk in batches (handles Supabase 1000 row limit)
-              let chunkData: any[] = [];
-              let chunkOffset = 0;
-              const chunkBatchSize = 1000;
-              let hasMore = true;
-              
-              while (hasMore) {
-                const { data: batchData, error: batchError } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
-                
-                if (batchError) {
-                  console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error fetching chunk batch at offset ${chunkOffset}:`, {
-                    message: batchError.message,
-                    details: batchError.details,
-                    hint: batchError.hint,
-                    code: batchError.code
-                  });
-                  throw batchError;
-                }
-                
-                if (batchData && batchData.length > 0) {
-                  chunkData = chunkData.concat(batchData);
-                  chunkOffset += chunkBatchSize;
-                  hasMore = batchData.length === chunkBatchSize;
-                } else {
-                  hasMore = false;
-                }
-              }
-              
-              return chunkData;
-            } catch (chunkError: any) {
-              console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error processing chunk (${chunk.length} usernames):`, {
-                message: chunkError.message,
-                details: chunkError.details,
-                hint: chunkError.hint,
-                code: chunkError.code
-              });
-              throw chunkError; // Re-throw to be caught by Promise.allSettled
+
+          // If we have a list of matching usernames from avg_views filter, use chunked fetching
+          if (matchingNormalizedUsernames && matchingNormalizedUsernames.length > 0) {
+            // Split usernames into smaller chunks for parallel processing
+            // Use smaller chunks (50) to avoid URL length issues
+            const batchChunkSize = 50;
+            const usernameChunks: string[][] = [];
+            for (let i = 0; i < matchingNormalizedUsernames.length; i += batchChunkSize) {
+              usernameChunks.push(matchingNormalizedUsernames.slice(i, i + batchChunkSize));
             }
-          };
-          
-          // Process chunks in parallel (15 at a time for speed)
-          const parallelBatchSize = 15;
-          for (let i = 0; i < usernameChunks.length; i += parallelBatchSize) {
-            const chunkBatch = usernameChunks.slice(i, i + parallelBatchSize);
-            console.log(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, usernameChunks.length)} of ${usernameChunks.length} in parallel`);
-            
-            const results = await Promise.allSettled(
-              chunkBatch.map(chunk => fetchChunk(chunk))
-            );
-            
-            // Collect successful results
-            for (let j = 0; j < results.length; j++) {
-              const result = results[j];
-              if (result.status === 'fulfilled') {
-                allMatchingOrders = allMatchingOrders.concat(result.value);
-                console.log(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Fetched ${result.value.length} orders from chunk (${chunkBatch[j].length} usernames), total so far: ${allMatchingOrders.length}`);
+
+            // Helper function to fetch orders for a single chunk
+            const fetchChunk = async (chunk: string[]): Promise<any[]> => {
+              try {
+                // Build query for this chunk
+                let chunkQuery = supabase
+                  .from('reference_orders')
+                  .select(`
+                    id,
+                    influencer_id,
+                    username,
+                    normalized_username,
+                    email,
+                    account_link,
+                    owner_name,
+                    approved_vendor,
+                    total_fee_per_import,
+                    price_usd,
+                    video_count,
+                    final_price,
+                    price_per_video,
+                    songs,
+                    paid,
+                    date_paid,
+                    video_links,
+                    created_at
+                  `)
+                  .in('normalized_username', chunk);
+
+                // Apply all other filters to each chunk
+                if (search) {
+                  const encoded = `%${search}%`;
+                  chunkQuery = chunkQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+                }
+                if (owner) {
+                  chunkQuery = chunkQuery.ilike('owner_name', `%${owner}%`);
+                }
+                if (approved === 'yes') {
+                  chunkQuery = chunkQuery.eq('approved_vendor', true);
+                } else if (approved === 'no') {
+                  chunkQuery = chunkQuery.eq('approved_vendor', false);
+                }
+                if (paid === 'paid') {
+                  chunkQuery = chunkQuery.eq('paid', true);
+                } else if (paid === 'unpaid') {
+                  chunkQuery = chunkQuery.eq('paid', false);
+                }
+                if (matched === 'true') {
+                  chunkQuery = chunkQuery.not('influencer_id', 'is', null);
+                } else if (matched === 'false') {
+                  chunkQuery = chunkQuery.is('influencer_id', null);
+                }
+                if (dateFrom) {
+                  chunkQuery = chunkQuery.gte('date_paid', dateFrom);
+                }
+                if (dateTo) {
+                  chunkQuery = chunkQuery.lte('date_paid', dateTo);
+                }
+                if (minPricePerVideo) {
+                  chunkQuery = chunkQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+                }
+                if (maxPricePerVideo) {
+                  chunkQuery = chunkQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+                }
+
+                // Fetch all records from this chunk in batches (handles Supabase 1000 row limit)
+                let chunkData: any[] = [];
+                let chunkOffset = 0;
+                const chunkBatchSize = 1000;
+                let hasMore = true;
+
+                while (hasMore) {
+                  const { data: batchData, error: batchError } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
+
+                  if (batchError) {
+                    console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error fetching chunk batch at offset ${chunkOffset}:`, {
+                      message: batchError.message,
+                      details: batchError.details,
+                      hint: batchError.hint,
+                      code: batchError.code
+                    });
+                    throw batchError;
+                  }
+
+                  if (batchData && batchData.length > 0) {
+                    chunkData = chunkData.concat(batchData);
+                    chunkOffset += chunkBatchSize;
+                    hasMore = batchData.length === chunkBatchSize;
+                  } else {
+                    hasMore = false;
+                  }
+                }
+
+                return chunkData;
+              } catch (chunkError: any) {
+                console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error processing chunk (${chunk.length} usernames):`, {
+                  message: chunkError.message,
+                  details: chunkError.details,
+                  hint: chunkError.hint,
+                  code: chunkError.code
+                });
+                throw chunkError; // Re-throw to be caught by Promise.allSettled
+              }
+            };
+
+            // Process chunks in parallel (15 at a time for speed)
+            const parallelBatchSize = 15;
+            for (let i = 0; i < usernameChunks.length; i += parallelBatchSize) {
+              const chunkBatch = usernameChunks.slice(i, i + parallelBatchSize);
+              console.log(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, usernameChunks.length)} of ${usernameChunks.length} in parallel`);
+
+              const results = await Promise.allSettled(
+                chunkBatch.map(chunk => fetchChunk(chunk))
+              );
+
+              // Collect successful results
+              for (let j = 0; j < results.length; j++) {
+                const result = results[j];
+                if (result.status === 'fulfilled') {
+                  allMatchingOrders = allMatchingOrders.concat(result.value);
+                  console.log(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Fetched ${result.value.length} orders from chunk (${chunkBatch[j].length} usernames), total so far: ${allMatchingOrders.length}`);
+                } else {
+                  console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error processing chunk (${chunkBatch[j].length} usernames):`, result.reason);
+                  // Continue with other chunks - partial results are better than none
+                }
+              }
+            }
+          } else {
+            // No avg_views filter, but we have price filter - fetch all orders directly with price filter
+            console.log(`[UNIQUE CREATORS + PRICE] Fetching all orders with price filter directly`);
+
+            let baseOrdersQuery = supabase
+              .from('reference_orders')
+              .select(`
+                id,
+                influencer_id,
+                username,
+                normalized_username,
+                email,
+                account_link,
+                owner_name,
+                approved_vendor,
+                total_fee_per_import,
+                price_usd,
+                video_count,
+                final_price,
+                price_per_video,
+                songs,
+                paid,
+                date_paid,
+                video_links,
+                created_at
+              `);
+
+            // Apply all filters
+            if (search) {
+              const encoded = `%${search}%`;
+              baseOrdersQuery = baseOrdersQuery.or(`username.ilike.${encoded},account_link.ilike.${encoded}`);
+            }
+            if (owner) {
+              baseOrdersQuery = baseOrdersQuery.ilike('owner_name', `%${owner}%`);
+            }
+            if (approved === 'yes') {
+              baseOrdersQuery = baseOrdersQuery.eq('approved_vendor', true);
+            } else if (approved === 'no') {
+              baseOrdersQuery = baseOrdersQuery.eq('approved_vendor', false);
+            }
+            if (paid === 'paid') {
+              baseOrdersQuery = baseOrdersQuery.eq('paid', true);
+            } else if (paid === 'unpaid') {
+              baseOrdersQuery = baseOrdersQuery.eq('paid', false);
+            }
+            if (matched === 'true') {
+              baseOrdersQuery = baseOrdersQuery.not('influencer_id', 'is', null);
+            } else if (matched === 'false') {
+              baseOrdersQuery = baseOrdersQuery.is('influencer_id', null);
+            }
+            if (dateFrom) {
+              baseOrdersQuery = baseOrdersQuery.gte('date_paid', dateFrom);
+            }
+            if (dateTo) {
+              baseOrdersQuery = baseOrdersQuery.lte('date_paid', dateTo);
+            }
+            if (minPricePerVideo) {
+              baseOrdersQuery = baseOrdersQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+            }
+            if (maxPricePerVideo) {
+              baseOrdersQuery = baseOrdersQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+            }
+
+            // Fetch all matching orders in batches
+            let batchOffset = 0;
+            const batchSize = 1000;
+            let hasMore = true;
+
+            while (hasMore) {
+              const { data: batchData, error: batchError } = await baseOrdersQuery.range(batchOffset, batchOffset + batchSize - 1);
+
+              if (batchError) {
+                console.error(`[UNIQUE CREATORS + PRICE] Error fetching orders batch:`, batchError);
+                throw batchError;
+              }
+
+              if (batchData && batchData.length > 0) {
+                allMatchingOrders = allMatchingOrders.concat(batchData);
+                batchOffset += batchSize;
+                hasMore = batchData.length === batchSize;
+                console.log(`[UNIQUE CREATORS + PRICE] Fetched ${batchData.length} orders, total so far: ${allMatchingOrders.length}`);
               } else {
-                console.error(`[UNIQUE CREATORS + AVG_VIEWS BATCH] Error processing chunk (${chunkBatch[j].length} usernames):`, result.reason);
-                // Continue with other chunks - partial results are better than none
+                hasMore = false;
               }
             }
           }
-          
+
           console.log(`[UNIQUE CREATORS + AVG_VIEWS] Fetched ${allMatchingOrders.length} total orders`);
-          
+
           // Deduplicate: keep only latest order per normalized_username
           const creatorMap = new Map<string, any>();
           for (const row of allMatchingOrders) {
@@ -627,15 +750,15 @@ export async function GET(request: NextRequest) {
               }
             }
           }
-          
+
           let uniqueOrders = Array.from(creatorMap.values());
           console.log(`[UNIQUE CREATORS + AVG_VIEWS] After deduplication: ${uniqueOrders.length} unique creators`);
-          
+
           // Enrich with avg_views (we already have matching usernames, but need to fetch full avg_views data)
           const normalizedUsernames = Array.from(
             new Set(uniqueOrders.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
           );
-          
+
           if (normalizedUsernames.length) {
             // Fetch avg_views in parallel batches if needed
             const avgViewChunkSize = 1000;
@@ -643,26 +766,26 @@ export async function GET(request: NextRequest) {
             for (let i = 0; i < normalizedUsernames.length; i += avgViewChunkSize) {
               avgViewChunks.push(normalizedUsernames.slice(i, i + avgViewChunkSize));
             }
-            
+
             let avgViewMap: Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }> = {};
-            
+
             // Process avg_views chunks in parallel (15 at a time)
             const parallelAvgBatchSize = 15;
             for (let i = 0; i < avgViewChunks.length; i += parallelAvgBatchSize) {
               const avgChunkBatch = avgViewChunks.slice(i, i + parallelAvgBatchSize);
-              
+
               const avgResults = await Promise.allSettled(
                 avgChunkBatch.map(async (avgChunk) => {
                   const { data: avgRows, error: avgError } = await supabase
                     .from('reference_creator_avg_views')
                     .select('normalized_username, avg_views, status, last_calculated_at')
                     .in('normalized_username', avgChunk);
-                  
+
                   if (avgError) throw avgError;
                   return avgRows || [];
                 })
               );
-              
+
               // Collect successful results
               for (const result of avgResults) {
                 if (result.status === 'fulfilled') {
@@ -680,7 +803,7 @@ export async function GET(request: NextRequest) {
                 }
               }
             }
-            
+
             uniqueOrders = uniqueOrders.map((row) => {
               const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
               return {
@@ -691,7 +814,7 @@ export async function GET(request: NextRequest) {
               };
             });
           }
-          
+
           // Apply sorting
           if (sortColumn === 'date_paid') {
             uniqueOrders.sort((a: any, b: any) => {
@@ -699,7 +822,7 @@ export async function GET(request: NextRequest) {
               const bPrice = b.price_per_video != null && !isNaN(Number(b.price_per_video)) ? Number(b.price_per_video) : 0;
               if (aPrice > 0 && bPrice === 0) return -1;
               if (aPrice === 0 && bPrice > 0) return 1;
-              
+
               const aDate = a.date_paid ? new Date(a.date_paid).getTime() : 0;
               const bDate = b.date_paid ? new Date(b.date_paid).getTime() : 0;
               if (aDate === 0 && bDate === 0) return 0;
@@ -727,12 +850,12 @@ export async function GET(request: NextRequest) {
               return 0;
             });
           }
-          
+
           // Update count and paginate
           count = uniqueOrders.length;
           const paginationOffset = (page - 1) * limit;
           data = uniqueOrders.slice(paginationOffset, paginationOffset + limit);
-          
+
           console.log(`[UNIQUE CREATORS + AVG_VIEWS] Returning page ${page}: ${data.length} records out of ${count} total`);
         } else {
           // No avg_views filter, use RPC function as before
@@ -742,30 +865,30 @@ export async function GET(request: NextRequest) {
             p_sort_by: sortBy,
             p_sort_order: sortOrder
           });
-          
+
           if (rpcError) throw rpcError;
-          
+
           if (rpcData && rpcData.length > 0) {
             // Get total count from first row
             count = rpcData[0].total_count || 0;
-            
+
             // Remove total_count from data
             data = rpcData.map((row: any) => {
               const { total_count, ...rest } = row;
               return rest;
             });
-            
+
             // Enrich with avg_views
             const normalizedUsernames = Array.from(
               new Set(data.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
             );
-            
+
             if (normalizedUsernames.length) {
               const { data: avgRows, error: avgError } = await supabase
                 .from('reference_creator_avg_views')
                 .select('normalized_username, avg_views, status, last_calculated_at')
                 .in('normalized_username', normalizedUsernames);
-              
+
               if (!avgError && avgRows) {
                 const avgViewMap = avgRows.reduce((acc: any, row: any) => {
                   const normalized = row.normalized_username;
@@ -777,7 +900,7 @@ export async function GET(request: NextRequest) {
                   };
                   return acc;
                 }, {});
-                
+
                 data = data.map((row) => {
                   const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
                   return {
@@ -789,7 +912,7 @@ export async function GET(request: NextRequest) {
                 });
               }
             }
-            
+
             // Apply client-side filters (search, owner, etc.) if needed
             if (search) {
               const encoded = search.toLowerCase();
@@ -834,6 +957,16 @@ export async function GET(request: NextRequest) {
               data = data.filter((row) => row.date_paid && row.date_paid <= dateTo);
               count = data.length;
             }
+            if (minPricePerVideo) {
+              const minVal = parseFloat(minPricePerVideo);
+              data = data.filter((row) => row.price_per_video != null && parseFloat(row.price_per_video) >= minVal);
+              count = data.length;
+            }
+            if (maxPricePerVideo) {
+              const maxVal = parseFloat(maxPricePerVideo);
+              data = data.filter((row) => row.price_per_video != null && parseFloat(row.price_per_video) <= maxVal);
+              count = data.length;
+            }
           } else {
             count = 0;
             data = [];
@@ -869,7 +1002,7 @@ export async function GET(request: NextRequest) {
           video_links,
           created_at
         `, { count: 'exact' });
-      
+
       // If uniqueCreators is true, fetch ALL data first (without other filters) to find unique creators
       // Then apply other filters after deduplication
       if (!uniqueCreators) {
@@ -902,24 +1035,30 @@ export async function GET(request: NextRequest) {
         if (dateTo) {
           customSortQuery = customSortQuery.lte('date_paid', dateTo);
         }
+        if (minPricePerVideo) {
+          customSortQuery = customSortQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+        }
+        if (maxPricePerVideo) {
+          customSortQuery = customSortQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+        }
       }
-      
+
       // Fetch ALL matching records (without pagination) to sort them properly
       // Supabase has a default limit of 1000, so we need to fetch in batches
       // Add ORDER BY to help Supabase optimize the query (even though we'll sort in memory)
       // Use id for consistent ordering to avoid Supabase query issues
       customSortQuery = customSortQuery.order('id', { ascending: true });
-      
+
       let allData: any[] = [];
       let totalCount = 0;
-      
+
       // Fetch total count first (this is faster than fetching all data)
       // Build a separate query just for count (can't reuse customSortQuery since select() was already called)
       try {
         let countQuery = supabase
           .from('reference_orders')
           .select('*', { count: 'exact', head: true });
-        
+
         // Apply same filters as customSortQuery
         if (!uniqueCreators) {
           if (search) {
@@ -950,8 +1089,14 @@ export async function GET(request: NextRequest) {
           if (dateTo) {
             countQuery = countQuery.lte('date_paid', dateTo);
           }
+          if (minPricePerVideo) {
+            countQuery = countQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+          }
+          if (maxPricePerVideo) {
+            countQuery = countQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+          }
         }
-        
+
         const { count: totalCountResult, error: countError } = await countQuery;
         if (countError) {
           console.error(`[Count Error]`, countError);
@@ -964,7 +1109,7 @@ export async function GET(request: NextRequest) {
         console.error(`[Count Exception]`, err);
         // Continue anyway
       }
-      
+
       // Always fetch in batches to handle datasets larger than 1000 records
       // Limit to reasonable number to avoid timeouts (e.g., 10k records max for sorting)
       const maxRecordsToFetch = 10000;
@@ -972,11 +1117,11 @@ export async function GET(request: NextRequest) {
       let batchOffset = 0;
       let hasMore = true;
       let firstBatchCount = 0;
-      
+
       while (hasMore && allData.length < maxRecordsToFetch) {
         try {
           const { data: batchData, error: batchError, count: batchCount } = await customSortQuery.range(batchOffset, batchOffset + batchSize - 1);
-          
+
           if (batchError) {
             console.error(`[Batch Fetch Error] Offset: ${batchOffset}, Error:`, batchError);
             // If we have some data, continue with what we have
@@ -986,14 +1131,14 @@ export async function GET(request: NextRequest) {
             }
             throw batchError;
           }
-          
+
           // Get total count from first batch if we didn't get it earlier
           if (batchOffset === 0 && batchCount !== null && totalCount === 0) {
             firstBatchCount = batchCount;
             totalCount = firstBatchCount;
             console.log(`[Batch Fetch] Total count from first batch: ${firstBatchCount}`);
           }
-          
+
           if (batchData && batchData.length > 0) {
             allData = allData.concat(batchData);
             console.log(`[Batch Fetch] Fetched ${batchData.length} records, total so far: ${allData.length}`);
@@ -1012,13 +1157,13 @@ export async function GET(request: NextRequest) {
           throw err;
         }
       }
-      
+
       if (allData.length >= maxRecordsToFetch) {
         console.warn(`[Batch Fetch] Hit max records limit (${maxRecordsToFetch}), sorting will be limited to these records`);
       }
-      
+
       console.log(`[Batch Fetch Complete] Total records fetched: ${allData.length}`);
-      
+
       // Use the count from first batch, or fallback to actual length
       totalCount = firstBatchCount > 0 ? firstBatchCount : allData.length;
 
@@ -1127,6 +1272,14 @@ export async function GET(request: NextRequest) {
       if (dateTo) {
         enrichedAll = enrichedAll.filter((row) => row.date_paid && row.date_paid <= dateTo);
       }
+      if (minPricePerVideo) {
+        const minVal = parseFloat(minPricePerVideo);
+        enrichedAll = enrichedAll.filter((row) => row.price_per_video != null && parseFloat(row.price_per_video) >= minVal);
+      }
+      if (maxPricePerVideo) {
+        const maxVal = parseFloat(maxPricePerVideo);
+        enrichedAll = enrichedAll.filter((row) => row.price_per_video != null && parseFloat(row.price_per_video) <= maxVal);
+      }
 
       // Apply avg views filters
       if (minAvgViews) {
@@ -1149,13 +1302,13 @@ export async function GET(request: NextRequest) {
 
       // Sort based on the selected column
       // Use consistent null handling: null values go to the end (or beginning) based on sort order
-      console.log(`[Before Sort] First 5 records:`, enrichedAll.slice(0, 5).map(r => ({ 
-        username: r.username, 
+      console.log(`[Before Sort] First 5 records:`, enrichedAll.slice(0, 5).map(r => ({
+        username: r.username,
         price_per_video: r.price_per_video,
         avg_views: r.avg_views,
         owner_name: r.owner_name
       })));
-      
+
       if (sortBy === 'avg_views') {
         enrichedAll.sort((a, b) => {
           // Convert to numbers, handling strings and nulls
@@ -1185,7 +1338,7 @@ export async function GET(request: NextRequest) {
         // Numeric sorting for price_per_video
         console.log(`[Price Per Video Sort] Starting sort, ascending: ${ascending}`);
         console.log(`[Price Per Video Sort] Sample values before sort:`, enrichedAll.slice(0, 10).map(r => r.price_per_video));
-        
+
         enrichedAll.sort((a, b) => {
           // Convert to numbers, handling strings and nulls
           // Note: 0 is a valid value, only null/undefined/NaN should be treated as missing
@@ -1198,7 +1351,7 @@ export async function GET(request: NextRequest) {
           const result = ascending ? aNum - bNum : bNum - aNum;
           return result;
         });
-        
+
         console.log(`[Price Per Video Sort] Sample values after sort:`, enrichedAll.slice(0, 10).map(r => r.price_per_video));
         console.log(`[Price Per Video Sort] Last 10 values after sort:`, enrichedAll.slice(-10).map(r => r.price_per_video));
       } else if (sortBy === 'date_paid') {
@@ -1210,7 +1363,7 @@ export async function GET(request: NextRequest) {
           // Non-zero prices come first
           if (aPrice > 0 && bPrice === 0) return -1;
           if (aPrice === 0 && bPrice > 0) return 1;
-          
+
           // If both are non-zero or both are zero, sort by date_paid
           const aDate = a.date_paid ? new Date(a.date_paid).getTime() : 0;
           const bDate = b.date_paid ? new Date(b.date_paid).getTime() : 0;
@@ -1220,16 +1373,16 @@ export async function GET(request: NextRequest) {
           return ascending ? aDate - bDate : bDate - aDate;
         });
       }
-      
+
       console.log(`[After Sort] sortBy: ${sortBy}, sortOrder: ${ascending ? 'asc' : 'desc'}, total records: ${enrichedAll.length}`);
-      console.log(`[After Sort] First 5 records:`, enrichedAll.slice(0, 5).map(r => ({ 
-        username: r.username, 
+      console.log(`[After Sort] First 5 records:`, enrichedAll.slice(0, 5).map(r => ({
+        username: r.username,
         price_per_video: r.price_per_video,
         avg_views: r.avg_views,
         owner_name: r.owner_name
       })));
-      console.log(`[After Sort] Last 5 records:`, enrichedAll.slice(-5).map(r => ({ 
-        username: r.username, 
+      console.log(`[After Sort] Last 5 records:`, enrichedAll.slice(-5).map(r => ({
+        username: r.username,
         price_per_video: r.price_per_video,
         avg_views: r.avg_views,
         owner_name: r.owner_name
@@ -1246,14 +1399,14 @@ export async function GET(request: NextRequest) {
       // For other columns, use database sorting (more efficient)
       // OPTIMIZATION: If avg_views filters are present, filter at database level first
       let matchingNormalizedUsernames: string[] | null = null;
-      
+
       if (minAvgViews || maxAvgViews) {
         console.log(`[AVG_VIEWS FILTER] Filtering avg_views at database level first`);
         // First, get normalized_usernames that match the avg_views filter
         let avgViewsQuery = supabase
           .from('reference_creator_avg_views')
           .select('normalized_username');
-        
+
         if (minAvgViews) {
           const minVal = parseFloat(minAvgViews);
           if (!isNaN(minVal)) {
@@ -1266,26 +1419,26 @@ export async function GET(request: NextRequest) {
             avgViewsQuery = avgViewsQuery.lte('avg_views', maxVal);
           }
         }
-        
+
         // Also filter out null avg_views
         avgViewsQuery = avgViewsQuery.not('avg_views', 'is', null);
-        
+
         // Fetch ALL matching usernames in batches (Supabase default limit is 1000)
         // This is critical - we need ALL matching creators, not just the first 1000
         let allAvgViewsData: any[] = [];
         let avgViewsOffset = 0;
         const avgViewsBatchSize = 1000;
         let hasMoreAvgViews = true;
-        
+
         while (hasMoreAvgViews) {
           const { data: batchData, error: batchError } = await avgViewsQuery
             .range(avgViewsOffset, avgViewsOffset + avgViewsBatchSize - 1);
-          
+
           if (batchError) {
             console.error(`[AVG_VIEWS FILTER ERROR]`, batchError);
             throw batchError;
           }
-          
+
           if (batchData && batchData.length > 0) {
             allAvgViewsData = allAvgViewsData.concat(batchData);
             avgViewsOffset += avgViewsBatchSize;
@@ -1294,10 +1447,10 @@ export async function GET(request: NextRequest) {
             hasMoreAvgViews = false;
           }
         }
-        
+
         matchingNormalizedUsernames = allAvgViewsData.map((row) => row.normalized_username).filter(Boolean);
         console.log(`[AVG_VIEWS FILTER] Found ${matchingNormalizedUsernames.length} creators matching avg_views filter (fetched in batches)`);
-        
+
         // If no creators match, return empty result early
         if (matchingNormalizedUsernames.length === 0) {
           return Response.json({
@@ -1322,7 +1475,7 @@ export async function GET(request: NextRequest) {
           });
         }
       }
-      
+
       // Build the main query
       let baseQuery = supabase
         .from('reference_orders')
@@ -1346,28 +1499,28 @@ export async function GET(request: NextRequest) {
           video_links,
           created_at
         `, { count: 'exact' });
-      
+
       // Apply avg_views filter at database level (if present)
       // If we have more than 1000 matching creators, we need to fetch in batches
       const chunkSize = 1000; // Supabase .in() limit
       if (matchingNormalizedUsernames && matchingNormalizedUsernames.length > 0) {
-        
+
         if (matchingNormalizedUsernames.length <= chunkSize) {
           // Simple case: <= 1000 creators, use .in() directly
           baseQuery = baseQuery.in('normalized_username', matchingNormalizedUsernames);
         } else {
           // Complex case: > 1000 creators, need to fetch in batches and combine
           console.log(`[AVG_VIEWS FILTER] ${matchingNormalizedUsernames.length} matching creators (exceeds ${chunkSize} limit), fetching in batches`);
-          
+
           // Fetch all matching orders in batches
           const usernameChunks: string[][] = [];
           for (let i = 0; i < matchingNormalizedUsernames.length; i += chunkSize) {
             usernameChunks.push(matchingNormalizedUsernames.slice(i, i + chunkSize));
           }
-          
+
           let allMatchingOrders: any[] = [];
           let totalCount = 0;
-          
+
           // Helper function to fetch orders for a single chunk
           const fetchChunkOrders = async (chunk: string[]): Promise<{ orders: any[], count: number }> => {
             let chunkQuery = supabase
@@ -1393,7 +1546,7 @@ export async function GET(request: NextRequest) {
                 created_at
               `, { count: 'exact' })
               .in('normalized_username', chunk);
-            
+
             // Apply all other filters to each chunk
             if (search) {
               const encoded = `%${search}%`;
@@ -1423,7 +1576,13 @@ export async function GET(request: NextRequest) {
             if (dateTo) {
               chunkQuery = chunkQuery.lte('date_paid', dateTo);
             }
-            
+            if (minPricePerVideo) {
+              chunkQuery = chunkQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+            }
+            if (maxPricePerVideo) {
+              chunkQuery = chunkQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+            }
+
             // Apply ordering: prioritize non-zero price_per_video when sorting by date_paid
             if (sortColumn === 'date_paid') {
               chunkQuery = chunkQuery
@@ -1432,22 +1591,22 @@ export async function GET(request: NextRequest) {
             } else {
               chunkQuery = chunkQuery.order(sortColumn, { ascending, nullsFirst: false });
             }
-            
+
             // Fetch all records from this chunk (no pagination yet)
             let chunkData: any[] = [];
             let chunkOffset = 0;
             const chunkBatchSize = 1000;
             let hasMore = true;
             let chunkCount = 0;
-            
+
             while (hasMore) {
               const { data: batchData, error: batchError, count: batchCount } = await chunkQuery.range(chunkOffset, chunkOffset + chunkBatchSize - 1);
               if (batchError) throw batchError;
-              
+
               if (chunkOffset === 0 && batchCount !== null) {
                 chunkCount = batchCount;
               }
-              
+
               if (batchData && batchData.length > 0) {
                 chunkData = chunkData.concat(batchData);
                 chunkOffset += chunkBatchSize;
@@ -1456,20 +1615,20 @@ export async function GET(request: NextRequest) {
                 hasMore = false;
               }
             }
-            
+
             return { orders: chunkData, count: chunkCount };
           };
-          
+
           // Process chunks in parallel (15 at a time)
           const parallelBatchSize = 15;
           for (let i = 0; i < usernameChunks.length; i += parallelBatchSize) {
             const chunkBatch = usernameChunks.slice(i, i + parallelBatchSize);
             console.log(`[AVG_VIEWS FILTER BATCH] Processing chunks ${i + 1}-${Math.min(i + parallelBatchSize, usernameChunks.length)} of ${usernameChunks.length} in parallel`);
-            
+
             const results = await Promise.allSettled(
               chunkBatch.map(chunk => fetchChunkOrders(chunk))
             );
-            
+
             // Collect successful results
             for (let j = 0; j < results.length; j++) {
               const result = results[j];
@@ -1482,32 +1641,32 @@ export async function GET(request: NextRequest) {
               }
             }
           }
-          
+
           console.log(`[AVG_VIEWS FILTER] Total matching orders fetched: ${allMatchingOrders.length}, total count: ${totalCount}`);
-          
+
           // Now we have all matching orders, need to sort and paginate
           // Enrich with avg_views first
           const normalizedUsernames = Array.from(
             new Set(allMatchingOrders.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
           );
-          
+
           let avgViewMap: Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }> = {};
-          
+
           if (normalizedUsernames.length) {
             // Fetch avg_views in chunks too (if needed)
             const avgViewChunks: string[][] = [];
             for (let i = 0; i < normalizedUsernames.length; i += chunkSize) {
               avgViewChunks.push(normalizedUsernames.slice(i, i + chunkSize));
             }
-            
+
             for (const avgChunk of avgViewChunks) {
               const { data: avgRows, error: avgError } = await supabase
                 .from('reference_creator_avg_views')
                 .select('normalized_username, avg_views, status, last_calculated_at')
                 .in('normalized_username', avgChunk);
-              
+
               if (avgError) throw avgError;
-              
+
               (avgRows || []).forEach((row) => {
                 const normalized = row.normalized_username;
                 if (!normalized) return;
@@ -1519,7 +1678,7 @@ export async function GET(request: NextRequest) {
               });
             }
           }
-          
+
           // Enrich all data with avg_views
           let enrichedData = allMatchingOrders.map((row: any) => {
             const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
@@ -1530,7 +1689,7 @@ export async function GET(request: NextRequest) {
               avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
             };
           });
-          
+
           // Handle uniqueCreators filter if needed
           if (uniqueCreators) {
             const beforeCount = enrichedData.length;
@@ -1557,7 +1716,7 @@ export async function GET(request: NextRequest) {
             enrichedData = Array.from(creatorMap.values());
             console.log(`[UNIQUE CREATORS] Before: ${beforeCount}, After: ${enrichedData.length}`);
           }
-          
+
           // Sort the data
           // When sorting by date_paid, prioritize non-zero price_per_video first
           enrichedData.sort((a: any, b: any) => {
@@ -1570,7 +1729,7 @@ export async function GET(request: NextRequest) {
               if (aPrice === 0 && bPrice > 0) return 1;
               // If both are non-zero or both are zero, sort by date_paid
             }
-            
+
             const aVal = a[sortColumn];
             const bVal = b[sortColumn];
             if (aVal === null || aVal === undefined) return 1;
@@ -1584,12 +1743,12 @@ export async function GET(request: NextRequest) {
             if (aVal > bVal) return ascending ? 1 : -1;
             return 0;
           });
-          
+
           // Update count and paginate
           count = enrichedData.length;
           const paginationOffset = (page - 1) * limit;
           data = enrichedData.slice(paginationOffset, paginationOffset + limit);
-          
+
           // Skip the rest of the standard query logic
           // Jump to stats calculation
           const { data: summaryRow } = await supabase
@@ -1625,7 +1784,7 @@ export async function GET(request: NextRequest) {
           });
         }
       }
-      
+
       // Apply all other filters (only if we didn't already handle batching above)
       // If we have > 1000 matching creators, we already returned early, so this only runs for <= 1000 or no avg_views filter
       if (!matchingNormalizedUsernames || matchingNormalizedUsernames.length <= chunkSize) {
@@ -1657,8 +1816,14 @@ export async function GET(request: NextRequest) {
         if (dateTo) {
           baseQuery = baseQuery.lte('date_paid', dateTo);
         }
+        if (minPricePerVideo) {
+          baseQuery = baseQuery.gte('price_per_video', parseFloat(minPricePerVideo));
+        }
+        if (maxPricePerVideo) {
+          baseQuery = baseQuery.lte('price_per_video', parseFloat(maxPricePerVideo));
+        }
       }
-      
+
       // Handle uniqueCreators filter - need to fetch all matching records first
       if (uniqueCreators) {
         console.log(`[UNIQUE CREATORS] Fetching all records for unique creators filter`);
@@ -1668,7 +1833,7 @@ export async function GET(request: NextRequest) {
         let batchOffset = 0;
         let hasMore = true;
         let firstBatchCount = 0;
-        
+
         // Apply ordering: prioritize non-zero price_per_video when sorting by date_paid
         if (sortColumn === 'date_paid') {
           baseQuery = baseQuery
@@ -1677,15 +1842,15 @@ export async function GET(request: NextRequest) {
         } else {
           baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
         }
-        
+
         while (hasMore) {
           const { data: batchData, error: batchError, count: batchCount } = await baseQuery.range(batchOffset, batchOffset + batchSize - 1);
           if (batchError) throw batchError;
-          
+
           if (batchOffset === 0 && batchCount !== null) {
             firstBatchCount = batchCount;
           }
-          
+
           if (batchData && batchData.length > 0) {
             allData = allData.concat(batchData);
             batchOffset += batchSize;
@@ -1694,7 +1859,7 @@ export async function GET(request: NextRequest) {
             hasMore = false;
           }
         }
-        
+
         // Enrich with avg_views
         const normalizedUsernames = Array.from(
           new Set(allData.map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
@@ -1768,7 +1933,7 @@ export async function GET(request: NextRequest) {
             if (aPrice === 0 && bPrice > 0) return 1;
             // If both are non-zero or both are zero, sort by date_paid
           }
-          
+
           const aVal = a[sortColumn];
           const bVal = b[sortColumn];
           if (aVal === null || aVal === undefined) return 1;
@@ -1795,9 +1960,9 @@ export async function GET(request: NextRequest) {
             .order('price_per_video', { ascending: false, nullsFirst: false })
             .order(sortColumn, { ascending, nullsFirst: false });
         } else {
-        baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
+          baseQuery = baseQuery.order(sortColumn, { ascending, nullsFirst: false });
         }
-        
+
         // Fetch only the records needed for current page
         const { data: queryData, error: queryError, count: queryCount } = await baseQuery.range(offset, offset + limit - 1);
         if (queryError) {
@@ -1805,49 +1970,49 @@ export async function GET(request: NextRequest) {
           throw queryError;
         }
 
-      data = queryData || [];
-      count = queryCount || 0;
+        data = queryData || [];
+        count = queryCount || 0;
 
         // Enrich with avg_views for just this page
-      const normalizedUsernames = Array.from(
-        new Set((data || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
-      );
+        const normalizedUsernames = Array.from(
+          new Set((data || []).map((row) => row.normalized_username).filter(isValidNormalizedUsername)),
+        );
 
-      if (normalizedUsernames.length) {
-        const { data: avgRows, error: avgError } = await supabase
-          .from('reference_creator_avg_views')
-          .select('normalized_username, avg_views, status, last_calculated_at')
-          .in('normalized_username', normalizedUsernames);
+        if (normalizedUsernames.length) {
+          const { data: avgRows, error: avgError } = await supabase
+            .from('reference_creator_avg_views')
+            .select('normalized_username, avg_views, status, last_calculated_at')
+            .in('normalized_username', normalizedUsernames);
 
-        if (avgError) throw avgError;
+          if (avgError) throw avgError;
 
-        const avgViewMap = (avgRows || []).reduce((acc, row) => {
-          const normalized = row.normalized_username;
-          if (!normalized) return acc;
-          acc[normalized] = {
-            avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
-            status: row.status,
-            last_calculated_at: row.last_calculated_at,
-          };
-          return acc;
-        }, {} as Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }>);
+          const avgViewMap = (avgRows || []).reduce((acc, row) => {
+            const normalized = row.normalized_username;
+            if (!normalized) return acc;
+            acc[normalized] = {
+              avg_views: row.avg_views !== null && row.avg_views !== undefined ? Number(row.avg_views) : null,
+              status: row.status,
+              last_calculated_at: row.last_calculated_at,
+            };
+            return acc;
+          }, {} as Record<string, { avg_views: number | null; status?: string | null; last_calculated_at?: string | null }>);
 
-        data = data.map((row) => {
-          const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
-          return {
+          data = data.map((row) => {
+            const avgViewEntry = row.normalized_username ? avgViewMap[row.normalized_username] : null;
+            return {
+              ...row,
+              avg_views: avgViewEntry?.avg_views ?? null,
+              avg_views_status: avgViewEntry?.status ?? null,
+              avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
+            };
+          });
+        } else {
+          data = data.map((row) => ({
             ...row,
-            avg_views: avgViewEntry?.avg_views ?? null,
-            avg_views_status: avgViewEntry?.status ?? null,
-            avg_views_updated_at: avgViewEntry?.last_calculated_at ?? null,
-          };
-        });
-      } else {
-        data = data.map((row) => ({
-          ...row,
-          avg_views: null,
-          avg_views_status: null,
-          avg_views_updated_at: null,
-        }));
+            avg_views: null,
+            avg_views_status: null,
+            avg_views_updated_at: null,
+          }));
         }
       }
     }

@@ -105,7 +105,7 @@ const formatTimestampInUKTime = (isoString: string): string => {
   // Parse the UTC timestamp and convert to UK timezone
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return isoString;
-  
+
   // Format in UK timezone (Europe/London)
   // Use Intl.DateTimeFormat to properly handle timezone conversion
   const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -118,7 +118,7 @@ const formatTimestampInUKTime = (isoString: string): string => {
     second: '2-digit',
     hour12: false,
   });
-  
+
   const parts = formatter.formatToParts(date);
   const year = parts.find(p => p.type === 'year')?.value || '';
   const month = parts.find(p => p.type === 'month')?.value || '';
@@ -126,7 +126,7 @@ const formatTimestampInUKTime = (isoString: string): string => {
   const hour = parts.find(p => p.type === 'hour')?.value || '';
   const minute = parts.find(p => p.type === 'minute')?.value || '';
   const second = parts.find(p => p.type === 'second')?.value || '';
-  
+
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 };
 
@@ -134,7 +134,7 @@ const formatTimestampInUKTime = (isoString: string): string => {
 const utcToUKDateTimeLocal = (isoString: string): string => {
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return '';
-  
+
   // Format in UK timezone for datetime-local input
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/London',
@@ -145,7 +145,7 @@ const utcToUKDateTimeLocal = (isoString: string): string => {
     minute: '2-digit',
     hour12: false,
   });
-  
+
   // Use formatToParts to get individual components
   const parts = formatter.formatToParts(date);
   const year = parts.find(p => p.type === 'year')?.value || '';
@@ -153,7 +153,7 @@ const utcToUKDateTimeLocal = (isoString: string): string => {
   const day = parts.find(p => p.type === 'day')?.value || '';
   const hour = parts.find(p => p.type === 'hour')?.value || '';
   const minute = parts.find(p => p.type === 'minute')?.value || '';
-  
+
   return `${year}-${month}-${day}T${hour}:${minute}`;
 };
 
@@ -164,21 +164,21 @@ const ukDateTimeLocalToUTC = (ukDateTimeLocal: string): string => {
   if (!datePart || !timePart) {
     throw new Error('Invalid datetime format');
   }
-  
+
   const [year, month, day] = datePart.split('-').map(Number);
   const [hour, minute] = timePart.split(':').map(Number);
-  
+
   // Method: Binary search for the UTC time that produces the target UK time
   // UK timezone offset is typically 0 (GMT) or +1 (BST), but can vary
   // We'll test UTC times around the target and find which one produces the correct UK time
-  
+
   const targetHour = hour;
   const targetMinute = minute;
-  
+
   // Start with UTC time equal to UK time (assuming GMT)
   let bestUTC = new Date(Date.UTC(year, month - 1, day, targetHour, targetMinute, 0));
   let minDiff = Infinity;
-  
+
   // Try UTC times from -2 to +2 hours offset to find the one that produces target UK time
   for (let offsetHours = -2; offsetHours <= 2; offsetHours++) {
     const testUTC = new Date(Date.UTC(year, month - 1, day, targetHour - offsetHours, targetMinute, 0));
@@ -191,30 +191,30 @@ const ukDateTimeLocalToUTC = (ukDateTimeLocal: string): string => {
       minute: '2-digit',
       hour12: false,
     });
-    
+
     // Parse UK time string (format: "DD/MM/YYYY, HH:mm" or "DD/MM/YYYY HH:mm")
     const ukMatch = testUKTime.match(/(\d+)\/(\d+)\/(\d+)[,\s]+(\d+):(\d+)/);
     if (ukMatch) {
       const [, ukDay, ukMonth, ukYear, ukHour, ukMinute] = ukMatch.map(Number);
       // Check if this matches our target
-      if (ukYear === year && ukMonth === month && ukDay === day && 
-          ukHour === targetHour && ukMinute === targetMinute) {
+      if (ukYear === year && ukMonth === month && ukDay === day &&
+        ukHour === targetHour && ukMinute === targetMinute) {
         return testUTC.toISOString();
       }
     }
   }
-  
+
   // Fallback: return the best guess (assuming GMT)
   return bestUTC.toISOString();
 };
 
 const calculateVideoLinksCompletion = (videoLinks?: string | null, videoCount?: number | null): number | null => {
   if (!videoCount || videoCount === 0) return null;
-  
-  const linksCount = videoLinks && videoLinks.trim() 
-    ? videoLinks.split('\n').filter(l => l.trim()).length 
+
+  const linksCount = videoLinks && videoLinks.trim()
+    ? videoLinks.split('\n').filter(l => l.trim()).length
     : 0;
-  
+
   return Math.round((linksCount / videoCount) * 100);
 };
 
@@ -352,8 +352,10 @@ export default function ReferenceOrdersPage() {
   const [dateTo, setDateTo] = useState('');
   const [minAvgViews, setMinAvgViews] = useState('');
   const [maxAvgViews, setMaxAvgViews] = useState('');
+  const [minPricePerVideo, setMinPricePerVideo] = useState('');
+  const [maxPricePerVideo, setMaxPricePerVideo] = useState('');
   const [uniqueCreators, setUniqueCreators] = useState(false);
-  
+
   // Applied filters (what's actually being used for queries)
   const [appliedSearch, setAppliedSearch] = useState('');
   const [appliedOwnerFilter, setAppliedOwnerFilter] = useState('');
@@ -364,8 +366,10 @@ export default function ReferenceOrdersPage() {
   const [appliedDateTo, setAppliedDateTo] = useState('');
   const [appliedMinAvgViews, setAppliedMinAvgViews] = useState('');
   const [appliedMaxAvgViews, setAppliedMaxAvgViews] = useState('');
+  const [appliedMinPricePerVideo, setAppliedMinPricePerVideo] = useState('');
+  const [appliedMaxPricePerVideo, setAppliedMaxPricePerVideo] = useState('');
   const [appliedUniqueCreators, setAppliedUniqueCreators] = useState(false);
-  
+
   const [sortBy, setSortBy] = useState('date_paid');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -456,20 +460,20 @@ export default function ReferenceOrdersPage() {
     if (!confirm('Are you sure you want to force stop this job? This will mark it as stopped and allow you to start a new job.')) {
       return;
     }
-    
+
     setIsForceStopping(true);
     try {
       const response = await fetch(`${API_URL}/api/v1/reference-orders/avg-views/jobs/${jobId}/force-stop`, {
         method: 'POST',
       });
-      
+
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.detail || 'Failed to stop job');
       }
-      
+
       setBanner({ type: 'success', message: 'Avg view job stopped successfully. You can now start a new job.' });
-      
+
       // Refresh the jobs list
       await loadAvgViewJobs();
     } catch (err: any) {
@@ -495,6 +499,8 @@ export default function ReferenceOrdersPage() {
       if (appliedDateTo) params.append('date_to', appliedDateTo);
       if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
       if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
+      if (appliedMinPricePerVideo) params.append('min_price_per_video', appliedMinPricePerVideo);
+      if (appliedMaxPricePerVideo) params.append('max_price_per_video', appliedMaxPricePerVideo);
       if (appliedUniqueCreators) params.append('unique_creators', 'true');
       if (sortBy) params.append('sort_by', sortBy);
       if (sortOrder) params.append('sort_order', sortOrder);
@@ -689,6 +695,8 @@ export default function ReferenceOrdersPage() {
     setAppliedDateTo(dateTo);
     setAppliedMinAvgViews(minAvgViews);
     setAppliedMaxAvgViews(maxAvgViews);
+    setAppliedMinPricePerVideo(minPricePerVideo);
+    setAppliedMaxPricePerVideo(maxPricePerVideo);
     setAppliedUniqueCreators(uniqueCreators);
     setCurrentPage(1);
   };
@@ -696,7 +704,7 @@ export default function ReferenceOrdersPage() {
   useEffect(() => {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedSearch, appliedOwnerFilter, appliedApprovedFilter, appliedPaidFilter, appliedMatchedFilter, appliedDateFrom, appliedDateTo, appliedMinAvgViews, appliedMaxAvgViews, appliedUniqueCreators, sortBy, sortOrder, currentPage]);
+  }, [appliedSearch, appliedOwnerFilter, appliedApprovedFilter, appliedPaidFilter, appliedMatchedFilter, appliedDateFrom, appliedDateTo, appliedMinAvgViews, appliedMaxAvgViews, appliedMinPricePerVideo, appliedMaxPricePerVideo, appliedUniqueCreators, sortBy, sortOrder, currentPage]);
 
   useEffect(() => {
     loadSheetSyncState();
@@ -837,14 +845,14 @@ export default function ReferenceOrdersPage() {
       if (data.last_synced_at) {
         setLastSheetSyncAt(data.last_synced_at);
       }
-      
+
       // Use backend message if available, otherwise construct one
       const message = data.message || `Processed ${data.imported ?? 0} new orders from sheet`;
-      
+
       // Determine banner type based on results
-      const bannerType = data.imported === 0 && data.skipped > 0 ? 'warning' : 
-                        data.imported === 0 ? 'info' : 'success';
-      
+      const bannerType = data.imported === 0 && data.skipped > 0 ? 'warning' :
+        data.imported === 0 ? 'info' : 'success';
+
       setBanner({
         type: bannerType,
         message: message,
@@ -926,7 +934,7 @@ export default function ReferenceOrdersPage() {
     console.log('handleSendToOutreach called');
     console.log('selectedOrderIds:', Array.from(selectedOrderIds));
     console.log('selectedOrderDetails:', Object.keys(selectedOrderDetails));
-    
+
     if (selectedOrderIds.size === 0) {
       setBanner({ type: 'error', message: 'Please select at least one order' });
       return;
@@ -937,17 +945,17 @@ export default function ReferenceOrdersPage() {
       const selectedOrders = Array.from(selectedOrderIds)
         .map(id => selectedOrderDetails[id] || orders.find(o => o.id === id))
         .filter((o): o is ReferenceOrderRow => Boolean(o));
-      
+
       console.log('Selected orders:', selectedOrders.length);
       console.log('First order:', selectedOrders[0]);
 
       // Fetch all influencers once
       console.log('Fetching influencers...');
       const fetchPromise = fetch(`/api/influencers`);
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Fetch timeout after 10 seconds')), 10000)
       );
-      
+
       let response;
       try {
         response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
@@ -956,18 +964,18 @@ export default function ReferenceOrdersPage() {
         console.error('Fetch error:', fetchError);
         throw new Error(`Failed to fetch influencers: ${fetchError.message || fetchError}`);
       }
-      
+
       if (!response.ok) {
         console.error('Response not OK:', response.status, response.statusText);
         throw new Error(`Failed to fetch influencers: ${response.status} ${response.statusText}`);
       }
-      
+
       console.log('Parsing JSON...');
       const data = await response.json();
       console.log('Fetched data:', data);
       console.log('Fetched data type:', Array.isArray(data) ? 'array' : 'object');
       console.log('Data keys:', Object.keys(data));
-      
+
       // Handle different response formats
       let allInfluencers: any[] = [];
       if (Array.isArray(data)) {
@@ -979,15 +987,15 @@ export default function ReferenceOrdersPage() {
       } else {
         console.warn('Unexpected data format:', data);
       }
-      
+
       console.log('All influencers count:', allInfluencers.length);
       if (allInfluencers.length > 0) {
         console.log('First influencer:', allInfluencers[0]);
       }
-      
+
       // Build payload directly from orders - no need to match influencers
       console.log('Building payload from orders...');
-      
+
       const payload = selectedOrders
         .filter(order => order.email && order.username) // Only include orders with email and username
         .map(order => {
@@ -996,7 +1004,7 @@ export default function ReferenceOrdersPage() {
           if (order.influencer_id) {
             influencer = allInfluencers.find((inf: any) => inf.id === order.influencer_id);
           }
-          
+
           // Build payload from order data, use influencer data if available
           // Generate a stable temporary id if no influencer_id exists (outreach page will handle it)
           // Use email as fallback for id generation to ensure consistency
@@ -1010,12 +1018,12 @@ export default function ReferenceOrdersPage() {
             country: influencer?.country,
             engagement_rate: influencer?.engagement_rate,
           };
-          
+
           console.log('Built payload item:', payloadItem);
           return payloadItem;
         })
         .filter((inf): inf is OutreachSelectionInfluencer => Boolean(inf && inf.email && inf.id));
-      
+
       console.log('Final payload:', payload.length, 'items');
 
       if (payload.length === 0) {
@@ -1027,8 +1035,8 @@ export default function ReferenceOrdersPage() {
           message += 'No orders with valid email addresses found.';
         }
         console.error('Payload is empty:', message);
-        setBanner({ 
-          type: 'error', 
+        setBanner({
+          type: 'error',
           message: message.trim()
         });
         setSendingToOutreach(false);
@@ -1041,7 +1049,7 @@ export default function ReferenceOrdersPage() {
         // Load existing selection
         const existingSelectionStr = window.localStorage.getItem('outreachSelection');
         let existingSelection: OutreachSelectionInfluencer[] = [];
-        
+
         if (existingSelectionStr) {
           try {
             const parsed = JSON.parse(existingSelectionStr);
@@ -1053,27 +1061,27 @@ export default function ReferenceOrdersPage() {
             console.warn('Failed to parse existing selection, starting fresh:', e);
           }
         }
-        
+
         // Merge: deduplicate by email (most reliable identifier)
         const existingEmails = new Set(existingSelection.map(inf => inf.email?.toLowerCase()).filter(Boolean));
         const newItems = payload.filter(inf => {
           const emailLower = inf.email?.toLowerCase();
           return emailLower && !existingEmails.has(emailLower);
         });
-        
+
         const mergedSelection = [...existingSelection, ...newItems];
         console.log(`Merged selection: ${existingSelection.length} existing + ${newItems.length} new = ${mergedSelection.length} total`);
-        
+
         const payloadString = JSON.stringify(mergedSelection);
         console.log('Payload string length:', payloadString.length);
         window.localStorage.setItem('outreachSelection', payloadString);
         console.log('✅ Stored merged outreach selection:', mergedSelection.length, 'influencers');
         console.log('Payload preview:', mergedSelection.slice(0, 2));
-        
+
         // Verify it was stored
         const stored = window.localStorage.getItem('outreachSelection');
         console.log('Verified storage:', stored ? 'SUCCESS' : 'FAILED');
-        
+
         // Use window.location for more reliable navigation
         console.log('Navigating to /dashboard/outreach?source=orders');
         // Don't reset loading state here as we're navigating away
@@ -1093,7 +1101,7 @@ export default function ReferenceOrdersPage() {
   const toggleOrderSelection = (order: ReferenceOrderRow) => {
     const normalized = normalizeHandle(order.normalized_username || order.username);
     const isOrderSelected = selectedOrderIds.has(order.id);
-    
+
     // Toggle order selection (for outreach)
     setSelectedOrderIds(prev => {
       const updated = new Set(prev);
@@ -1112,7 +1120,7 @@ export default function ReferenceOrdersPage() {
       }
       return updated;
     });
-    
+
     // Also toggle creator selection (for avg views) if normalized username exists
     if (normalized) {
       setSelectedCreators(prev => {
@@ -1199,14 +1207,14 @@ export default function ReferenceOrdersPage() {
       setAvgViewProcessing(true);
       const payload =
         mode === 'manual'
-          ? { 
-              usernames: Object.values(selectedCreators)
-                .map((entry) => entry.handle)
-                .filter((handle): handle is string => Boolean(handle && handle.trim())), // Filter out empty/invalid handles
-              mode: 'manual' 
-            }
+          ? {
+            usernames: Object.values(selectedCreators)
+              .map((entry) => entry.handle)
+              .filter((handle): handle is string => Boolean(handle && handle.trim())), // Filter out empty/invalid handles
+            mode: 'manual'
+          }
           : { mode: 'all' };
-      
+
       // Validate that we have valid usernames for manual mode
       if (mode === 'manual' && (!payload.usernames || payload.usernames.length === 0)) {
         setBanner({ type: 'error', message: 'No valid usernames found in selected orders. Please ensure orders have valid usernames.' });
@@ -1278,6 +1286,8 @@ export default function ReferenceOrdersPage() {
     setDateTo('');
     setMinAvgViews('');
     setMaxAvgViews('');
+    setMinPricePerVideo('');
+    setMaxPricePerVideo('');
     setUniqueCreators(false);
     // Also clear applied filters
     setAppliedSearch('');
@@ -1289,6 +1299,8 @@ export default function ReferenceOrdersPage() {
     setAppliedDateTo('');
     setAppliedMinAvgViews('');
     setAppliedMaxAvgViews('');
+    setAppliedMinPricePerVideo('');
+    setAppliedMaxPricePerVideo('');
     setAppliedUniqueCreators(false);
     setCurrentPage(1);
   };
@@ -1618,40 +1630,37 @@ export default function ReferenceOrdersPage() {
 
         {banner && (
           <div
-            className={`mb-4 p-4 border rounded-lg flex items-start gap-3 ${
-              banner.type === 'success' ? 'bg-blue-50 border-blue-200 text-blue-900' :
-              banner.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-900' :
-              banner.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-900' :
-              'bg-red-50 border-red-200 text-red-900'
-            }`}
+            className={`mb-4 p-4 border rounded-lg flex items-start gap-3 ${banner.type === 'success' ? 'bg-blue-50 border-blue-200 text-blue-900' :
+                banner.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-900' :
+                  banner.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-900' :
+                    'bg-red-50 border-red-200 text-red-900'
+              }`}
           >
             {banner.type === 'error' ? (
               <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
             ) : (
               <CheckCircle2
-                className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
-                  banner.type === 'success' ? 'text-blue-600' : 
-                  banner.type === 'warning' ? 'text-yellow-600' :
-                  'text-blue-600'
-                }`}
+                className={`w-5 h-5 flex-shrink-0 mt-0.5 ${banner.type === 'success' ? 'text-blue-600' :
+                    banner.type === 'warning' ? 'text-yellow-600' :
+                      'text-blue-600'
+                  }`}
               />
             )}
             <div className="flex-1">
               <p className="font-semibold">
-                {banner.type === 'success' ? 'Success' : 
-                 banner.type === 'warning' ? 'Warning' :
-                 banner.type === 'info' ? 'Info' :
-                 'Something went wrong'}
+                {banner.type === 'success' ? 'Success' :
+                  banner.type === 'warning' ? 'Warning' :
+                    banner.type === 'info' ? 'Info' :
+                      'Something went wrong'}
               </p>
               <p className="text-sm">{banner.message}</p>
             </div>
             <button
-              className={`${
-                banner.type === 'success' ? 'text-blue-500 hover:text-blue-700' :
-                banner.type === 'warning' ? 'text-yellow-500 hover:text-yellow-700' :
-                banner.type === 'info' ? 'text-blue-500 hover:text-blue-700' :
-                'text-red-500 hover:text-red-700'
-              }`}
+              className={`${banner.type === 'success' ? 'text-blue-500 hover:text-blue-700' :
+                  banner.type === 'warning' ? 'text-yellow-500 hover:text-yellow-700' :
+                    banner.type === 'info' ? 'text-blue-500 hover:text-blue-700' :
+                      'text-red-500 hover:text-red-700'
+                }`}
               onClick={() => setBanner(null)}
               aria-label="Dismiss message"
             >
@@ -1786,79 +1795,79 @@ export default function ReferenceOrdersPage() {
                 <p className="text-sm text-gray-500">No avg view jobs have been queued yet.</p>
               ) : (
                 <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600">
-                        <th className="px-4 py-3">Mode</th>
-                        <th className="px-4 py-3">Requested</th>
-                        <th className="px-4 py-3">Processed</th>
-                        <th className="px-4 py-3">Skipped</th>
-                        <th className="px-4 py-3">Status</th>
-                        <th className="px-4 py-3">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedJobs.map((job) => (
-                        <tr key={job.id} className="border-b border-gray-100 last:border-0">
-                          <td className="px-4 py-3 text-gray-700 capitalize">{job.mode || 'manual'}</td>
-                          <td className="px-4 py-3 text-gray-900 font-medium">
-                            {numberFormatter.format(job.total_requested ?? 0)}
-                            {job.metadata?.non_tiktok_skipped ? (
-                              <div className="text-xs text-gray-500">{numberFormatter.format(job.metadata.non_tiktok_skipped)} non-TikTok skipped</div>
-                            ) : null}
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {numberFormatter.format(job.total_processed ?? 0)}{' '}
-                            <span className="text-xs text-gray-500">
-                              / {numberFormatter.format(job.total_enqueued ?? job.total_requested ?? 0)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {numberFormatter.format(job.total_skipped ?? 0)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getJobStatusBadge(
-                                job.status,
-                              )}`}
-                            >
-                              {job.status}
-                            </span>
-                            {job.error_message && (
-                              <p className="text-xs text-red-500 mt-1 truncate max-w-[200px]">{job.error_message}</p>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">{formatDateValue(job.created_at)}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600">
+                          <th className="px-4 py-3">Mode</th>
+                          <th className="px-4 py-3">Requested</th>
+                          <th className="px-4 py-3">Processed</th>
+                          <th className="px-4 py-3">Skipped</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Created</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Jobs Pagination */}
-                {jobsPageCount > 1 && (
-                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
-                    <span className="text-sm text-gray-600">
-                      Page {jobsPage} of {jobsPageCount} ({avgViewJobs.length} jobs)
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setJobsPage((p) => Math.max(1, p - 1))}
-                        disabled={jobsPage <= 1}
-                        className="px-3 py-1 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        onClick={() => setJobsPage((p) => Math.min(jobsPageCount, p + 1))}
-                        disabled={jobsPage >= jobsPageCount}
-                        className="px-3 py-1 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Next
-                      </button>
-                    </div>
+                      </thead>
+                      <tbody>
+                        {paginatedJobs.map((job) => (
+                          <tr key={job.id} className="border-b border-gray-100 last:border-0">
+                            <td className="px-4 py-3 text-gray-700 capitalize">{job.mode || 'manual'}</td>
+                            <td className="px-4 py-3 text-gray-900 font-medium">
+                              {numberFormatter.format(job.total_requested ?? 0)}
+                              {job.metadata?.non_tiktok_skipped ? (
+                                <div className="text-xs text-gray-500">{numberFormatter.format(job.metadata.non_tiktok_skipped)} non-TikTok skipped</div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">
+                              {numberFormatter.format(job.total_processed ?? 0)}{' '}
+                              <span className="text-xs text-gray-500">
+                                / {numberFormatter.format(job.total_enqueued ?? job.total_requested ?? 0)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">
+                              {numberFormatter.format(job.total_skipped ?? 0)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getJobStatusBadge(
+                                  job.status,
+                                )}`}
+                              >
+                                {job.status}
+                              </span>
+                              {job.error_message && (
+                                <p className="text-xs text-red-500 mt-1 truncate max-w-[200px]">{job.error_message}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">{formatDateValue(job.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                )}
+                  {/* Jobs Pagination */}
+                  {jobsPageCount > 1 && (
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
+                      <span className="text-sm text-gray-600">
+                        Page {jobsPage} of {jobsPageCount} ({avgViewJobs.length} jobs)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setJobsPage((p) => Math.max(1, p - 1))}
+                          disabled={jobsPage <= 1}
+                          className="px-3 py-1 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Prev
+                        </button>
+                        <button
+                          onClick={() => setJobsPage((p) => Math.min(jobsPageCount, p + 1))}
+                          disabled={jobsPage >= jobsPageCount}
+                          className="px-3 py-1 border border-gray-300 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -2005,6 +2014,36 @@ export default function ReferenceOrdersPage() {
                       }
                     }}
                     placeholder="e.g. 1000000"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Min Price/Video</label>
+                  <input
+                    type="number"
+                    value={minPricePerVideo}
+                    onChange={(e) => setMinPricePerVideo(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
+                    }}
+                    placeholder="e.g. 10"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Max Price/Video</label>
+                  <input
+                    type="number"
+                    value={maxPricePerVideo}
+                    onChange={(e) => setMaxPricePerVideo(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
+                    }}
+                    placeholder="e.g. 500"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
@@ -2259,16 +2298,16 @@ export default function ReferenceOrdersPage() {
                                 {(() => {
                                   const accountUrl = getAccountUrl(order.account_link, order.username);
                                   return accountUrl ? (
-                                  <a
+                                    <a
                                       href={accountUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:underline"
-                                  >
-                                    View
-                                  </a>
-                                ) : (
-                                  '—'
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      View
+                                    </a>
+                                  ) : (
+                                    '—'
                                   );
                                 })()}
                               </td>
@@ -2313,11 +2352,11 @@ export default function ReferenceOrdersPage() {
                                   const linksCount = order.video_links && order.video_links.trim()
                                     ? order.video_links.split('\n').filter(l => l.trim()).length
                                     : 0;
-                                  const bgColor = completion === 100 
-                                    ? 'bg-green-100 text-green-700' 
-                                    : completion >= 50 
-                                    ? 'bg-yellow-100 text-yellow-700' 
-                                    : 'bg-red-100 text-red-700';
+                                  const bgColor = completion === 100
+                                    ? 'bg-green-100 text-green-700'
+                                    : completion >= 50
+                                      ? 'bg-yellow-100 text-yellow-700'
+                                      : 'bg-red-100 text-red-700';
                                   return (
                                     <div className="flex flex-col gap-1">
                                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${bgColor}`}>

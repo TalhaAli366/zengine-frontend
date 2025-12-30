@@ -84,6 +84,7 @@ export default function InfluencersPage() {
   const [selectedSound, setSelectedSound] = useState('');
   const [reachedOutFilter, setReachedOutFilter] = useState('');
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
+  const [onlyPersonalEmail, setOnlyPersonalEmail] = useState(false);
 
   // Applied filter states (what's actually being used for queries)
   const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
@@ -98,6 +99,7 @@ export default function InfluencersPage() {
   const [appliedSelectedSound, setAppliedSelectedSound] = useState('');
   const [appliedReachedOutFilter, setAppliedReachedOutFilter] = useState('');
   const [appliedOnlyWithEmail, setAppliedOnlyWithEmail] = useState(false);
+  const [appliedOnlyPersonalEmail, setAppliedOnlyPersonalEmail] = useState(false);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [hashtags, setHashtags] = useState<Hashtag[]>([]);
   const [sounds, setSounds] = useState<Sound[]>([]);
@@ -166,6 +168,7 @@ export default function InfluencersPage() {
     setAppliedSelectedSound(selectedSound);
     setAppliedReachedOutFilter(reachedOutFilter);
     setAppliedOnlyWithEmail(onlyWithEmail);
+    setAppliedOnlyPersonalEmail(onlyPersonalEmail);
     setCurrentPage(1);
   };
 
@@ -173,7 +176,7 @@ export default function InfluencersPage() {
     loadCampaigns();
     loadFilters();
     loadInfluencers();
-  }, [currentPage, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail]); // Reload when page or applied filters change
+  }, [currentPage, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail]); // Reload when page or applied filters change
 
   // Scroll position detection for scroll buttons
   useEffect(() => {
@@ -251,6 +254,7 @@ export default function InfluencersPage() {
       sound: appliedSelectedSound,
       reachedOut: appliedReachedOutFilter,
       onlyWithEmail: appliedOnlyWithEmail,
+      onlyPersonalEmail: appliedOnlyPersonalEmail,
     });
 
     // Only filter selections when filters actually change (not on initial load or page change)
@@ -263,7 +267,7 @@ export default function InfluencersPage() {
     }
 
     prevFiltersRef.current = filterSignature;
-  }, [loadingInfluencers, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail, selectedInfluencerIds.length]);
+  }, [loadingInfluencers, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail, selectedInfluencerIds.length]);
 
   // Sync influencers state when allInfluencers changes (from API response)
   useEffect(() => {
@@ -317,6 +321,7 @@ export default function InfluencersPage() {
       if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
       if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
       if (appliedOnlyWithEmail) params.append('has_email', 'true');
+      if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
 
       const url = `/api/influencers?${params.toString()}`;
       const response = await fetch(url);
@@ -368,6 +373,7 @@ export default function InfluencersPage() {
         if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
         if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
         if (appliedOnlyWithEmail) params.append('has_email', 'true');
+        if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
 
         const url = `/api/influencers?${params.toString()}`;
         const response = await fetch(url);
@@ -555,6 +561,7 @@ export default function InfluencersPage() {
     setSelectedSound('');
     setReachedOutFilter('');
     setOnlyWithEmail(false);
+    setOnlyPersonalEmail(false);
     // Also clear applied filters
     setAppliedSearchQuery('');
     setAppliedSelectedCampaign('');
@@ -568,11 +575,12 @@ export default function InfluencersPage() {
     setAppliedSelectedSound('');
     setAppliedReachedOutFilter('');
     setAppliedOnlyWithEmail(false);
+    setAppliedOnlyPersonalEmail(false);
     setCurrentPage(1); // Reset to first page
     // loadInfluencers will be called automatically via useEffect when applied filters change
   };
 
-  const hasActiveFilters = appliedSearchQuery || appliedSelectedCampaign || appliedMinFollowers || appliedMaxFollowers || appliedMinEngagementRate || appliedMaxEngagementRate || appliedMinAvgViews || appliedMaxAvgViews || appliedSelectedHashtag || appliedSelectedSound || appliedReachedOutFilter || appliedOnlyWithEmail;
+  const hasActiveFilters = appliedSearchQuery || appliedSelectedCampaign || appliedMinFollowers || appliedMaxFollowers || appliedMinEngagementRate || appliedMaxEngagementRate || appliedMinAvgViews || appliedMaxAvgViews || appliedSelectedHashtag || appliedSelectedSound || appliedReachedOutFilter || appliedOnlyWithEmail || appliedOnlyPersonalEmail;
   const hasSelection = selectedInfluencerIds.length > 0;
   const pageSelectionCount = influencers.filter(inf => selectedInfluencerIds.includes(inf.id)).length;
   const allPageSelected = influencers.length > 0 && pageSelectionCount === influencers.length;
@@ -605,6 +613,7 @@ export default function InfluencersPage() {
       if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
       if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
       if (appliedOnlyWithEmail) params.append('has_email', 'true');
+      if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
 
       params.append('format', format);
       const endpoint = '/api/influencers/export';
@@ -1103,6 +1112,20 @@ export default function InfluencersPage() {
                   />
                   <label htmlFor="only-with-email" className="text-sm font-medium text-gray-700">
                     Only show influencers with an email
+                  </label>
+                </div>
+
+                {/* Only Personal Emails */}
+                <div className="flex items-center gap-3 pt-6">
+                  <input
+                    id="only-personal-email"
+                    type="checkbox"
+                    checked={onlyPersonalEmail}
+                    onChange={(e) => setOnlyPersonalEmail(e.target.checked)}
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                  />
+                  <label htmlFor="only-personal-email" className="text-sm font-medium text-gray-700">
+                    Only show personal emails (Gmail, Outlook, Yahoo, etc.)
                   </label>
                 </div>
               </div>
