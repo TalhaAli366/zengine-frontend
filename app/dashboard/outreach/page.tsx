@@ -61,6 +61,18 @@ interface ZohoStatus {
   last_connected_at?: string;
   source?: 'env' | 'db';
   can_disconnect?: boolean;
+  senders?: ZohoSender[];
+}
+
+interface ZohoSender {
+  id: string;
+  from_address?: string;
+  data_center?: string;
+  status: 'connected' | 'pending' | 'disconnected';
+  last_connected_at?: string;
+  source?: 'env' | 'db';
+  can_disconnect?: boolean;
+  is_default?: boolean;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -87,6 +99,8 @@ export default function OutreachPage() {
   const [outreachLogs, setOutreachLogs] = useState<OutreachLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [zohoStatus, setZohoStatus] = useState<ZohoStatus | null>(null);
+  const [zohoSenders, setZohoSenders] = useState<ZohoSender[]>([]);
+  const [selectedSenderId, setSelectedSenderId] = useState('');
   const [zohoForm, setZohoForm] = useState({
     clientId: '',
     clientSecret: '',
@@ -320,7 +334,8 @@ export default function OutreachPage() {
         body: JSON.stringify({
           template_id: selectedTemplate,
           influencer_ids: selectedInfluencers,
-          custom_variables: {}
+          custom_variables: {},
+          sender_integration_id: selectedSenderId && selectedSenderId !== 'env' ? selectedSenderId : null,
         })
       });
 
@@ -421,6 +436,16 @@ export default function OutreachPage() {
         last_connected_at: data.last_connected_at,
         source: data.source,
         can_disconnect: data.can_disconnect,
+        senders: data.senders || [],
+      });
+      const connectedSenders = (data.senders || []).filter((sender: ZohoSender) => sender.status === 'connected');
+      setZohoSenders(connectedSenders);
+      setSelectedSenderId((current) => {
+        if (current && connectedSenders.some((sender: ZohoSender) => sender.id === current)) {
+          return current;
+        }
+        const defaultSender = connectedSenders.find((sender: ZohoSender) => sender.is_default) || connectedSenders[0];
+        return defaultSender?.id || '';
       });
     } catch (error) {
       console.error('Failed to load Zoho status:', error);
@@ -457,18 +482,23 @@ export default function OutreachPage() {
     }
   };
 
-  const handleZohoDisconnect = async () => {
+  const handleZohoDisconnect = async (integrationId?: string) => {
+    const sender = zohoStatus?.senders?.find((item) => item.id === integrationId);
     setZohoLoading(true);
     setMessage(null);
     try {
-      const response = await fetch(`${API_URL}/api/v1/outreach/zoho/disconnect`, {
+      const params = integrationId && integrationId !== 'env' ? `?integration_id=${encodeURIComponent(integrationId)}` : '';
+      const response = await fetch(`${API_URL}/api/v1/outreach/zoho/disconnect${params}`, {
         method: 'POST',
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.detail || 'Failed to disconnect Zoho');
       }
-      setMessage({ type: 'success', text: 'Zoho integration disconnected.' });
+      setMessage({
+        type: 'success',
+        text: data.status === 'removed' ? 'Zoho sender removed.' : 'Zoho integration disconnected.',
+      });
       await loadZohoStatus();
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message || 'Failed to disconnect Zoho' });
@@ -561,6 +591,28 @@ export default function OutreachPage() {
           <div className="p-6">
             {activeTab === 'send' && (
               <form onSubmit={sendBulkEmails} className="space-y-6">
+                {zohoSenders.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Send From
+                    </label>
+                    <select
+                      value={selectedSenderId}
+                      onChange={(e) => setSelectedSenderId(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    >
+                      {zohoSenders.map(sender => (
+                        <option key={sender.id} value={sender.id}>
+                          {sender.from_address || 'Zoho sender'}{sender.is_default ? ' (default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Select which connected Zoho mailbox should send this outreach batch.
+                    </p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Email Template
@@ -857,7 +909,7 @@ export default function OutreachPage() {
                   <p className="text-sm text-gray-600 mb-4">
                     Connect your Zoho Mail account to send outreach emails directly from your Zoho mailbox.
                   </p>
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div className="space-y-4">
                     <div>
                       <p className="text-sm text-gray-500">Status</p>
                       <p className="text-lg font-semibold text-gray-900 capitalize">
@@ -882,14 +934,38 @@ export default function OutreachPage() {
                         </p>
                       )}
                     </div>
-                    {zohoStatus?.status === 'connected' && zohoStatus?.can_disconnect && (
-                      <button
-                        onClick={handleZohoDisconnect}
-                        disabled={zohoLoading}
-                        className="px-4 py-2 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
-                      >
-                        {zohoLoading ? 'Disconnecting...' : 'Disconnect'}
-                      </button>
+                    {zohoStatus?.senders && zohoStatus.senders.length > 0 && (
+                      <div className="space-y-3">
+                        <p className="text-sm font-medium text-gray-700">Zoho Senders</p>
+                        {zohoStatus.senders.map((sender) => (
+                          <div key={sender.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4">
+                            <div>
+                              <p className="font-medium text-gray-900">
+                                {sender.from_address || 'Zoho sender'}
+                                {sender.is_default && (
+                                  <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                                    Default
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-sm text-gray-500 capitalize">
+                                {sender.status} · {sender.data_center || 'com'}
+                                {sender.last_connected_at ? ` · ${new Date(sender.last_connected_at).toLocaleString()}` : ''}
+                              </p>
+                            </div>
+                            {sender.can_disconnect && (
+                              <button
+                                type="button"
+                                onClick={() => handleZohoDisconnect(sender.id)}
+                                disabled={zohoLoading}
+                                className="px-4 py-2 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+                              >
+                                {zohoLoading ? 'Removing...' : sender.status === 'connected' ? 'Disconnect' : 'Remove'}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -973,4 +1049,3 @@ export default function OutreachPage() {
     </div>
   );
 }
-
