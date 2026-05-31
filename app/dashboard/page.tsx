@@ -2,7 +2,7 @@
 
 import { Users, TrendingUp, Mail, DollarSign, Plus, Search, Send, FolderPlus, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getDashboardStats, getRecentActivities, Activity } from '@/lib/api';
 
 const ACTIVITY_PAGE_SIZE = 10;
@@ -22,40 +22,35 @@ export default function DashboardPage() {
     total_spent: 0,
   });
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingStats, setLoadingStats] = useState(true);
   const [loadingActivities, setLoadingActivities] = useState(true);
   const [activityPage, setActivityPage] = useState(1);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityPageCount, setActivityPageCount] = useState(1);
 
   useEffect(() => {
-    const loadData = async () => {
-      const [statsData, activitiesData] = await Promise.all([
-        getDashboardStats(),
-        getRecentActivities()
-      ]);
+    const loadStats = async () => {
+      setLoadingStats(true);
+      const statsData = await getDashboardStats();
       setStats(statsData);
-      setActivities(activitiesData);
-      setActivityPage(1);
-      setLoading(false);
-      setLoadingActivities(false);
+      setLoadingStats(false);
     };
-    loadData();
+
+    loadStats();
   }, []);
 
-  const activityPageCount = useMemo(
-    () => Math.max(1, Math.ceil((activities.length || 0) / ACTIVITY_PAGE_SIZE)),
-    [activities.length]
-  );
-
   useEffect(() => {
-    if (activityPage > activityPageCount) {
-      setActivityPage(activityPageCount);
-    }
-  }, [activityPage, activityPageCount]);
+    const loadActivities = async () => {
+      setLoadingActivities(true);
+      const result = await getRecentActivities(activityPage, ACTIVITY_PAGE_SIZE);
+      setActivities(result.activities);
+      setActivityTotal(result.total);
+      setActivityPageCount(result.totalPages);
+      setLoadingActivities(false);
+    };
 
-  const paginatedActivities = useMemo(() => {
-    const start = (activityPage - 1) * ACTIVITY_PAGE_SIZE;
-    return activities.slice(start, start + ACTIVITY_PAGE_SIZE);
-  }, [activities, activityPage]);
+    loadActivities();
+  }, [activityPage]);
 
   const getActivityIcon = (type: string) => {
     switch (type) {
@@ -118,7 +113,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <h3 className="text-gray-600 text-sm font-medium mb-1">Total Influencers</h3>
-          <p className="text-3xl font-bold text-gray-900">{stats.total_influencers}</p>
+          <p className="text-3xl font-bold text-gray-900">{loadingStats ? '...' : stats.total_influencers}</p>
           <p className="text-sm text-green-600 mt-2">Ready to reach out</p>
         </div>
 
@@ -129,7 +124,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <h3 className="text-gray-600 text-sm font-medium mb-1">Active Campaigns</h3>
-          <p className="text-3xl font-bold text-gray-900">{stats.active_campaigns}</p>
+          <p className="text-3xl font-bold text-gray-900">{loadingStats ? '...' : stats.active_campaigns}</p>
           <p className="text-sm text-gray-500 mt-2">In progress</p>
         </div>
 
@@ -140,7 +135,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <h3 className="text-gray-600 text-sm font-medium mb-1">Emails Sent</h3>
-          <p className="text-3xl font-bold text-gray-900">{stats.emails_sent}</p>
+          <p className="text-3xl font-bold text-gray-900">{loadingStats ? '...' : stats.emails_sent}</p>
           <p className="text-sm text-gray-500 mt-2">All time</p>
         </div>
 
@@ -151,7 +146,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <h3 className="text-gray-600 text-sm font-medium mb-1">Total Spent</h3>
-          <p className="text-3xl font-bold text-gray-900">${stats.total_spent}</p>
+          <p className="text-3xl font-bold text-gray-900">{loadingStats ? '...' : `$${stats.total_spent}`}</p>
           <p className="text-sm text-gray-500 mt-2">Across all campaigns</p>
         </div>
       </div>
@@ -193,7 +188,7 @@ export default function DashboardPage() {
         </div>
         ) : (
           <div className="space-y-3">
-            {paginatedActivities.map((activity) => (
+            {activities.map((activity) => (
               <div
                 key={activity.id}
                 className="flex items-start gap-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
@@ -229,7 +224,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between border-t border-gray-200 pt-4 mt-4">
               <p className="text-sm text-gray-600">
                 Showing {(activityPage - 1) * ACTIVITY_PAGE_SIZE + 1}-
-                {Math.min(activityPage * ACTIVITY_PAGE_SIZE, activities.length)} of {activities.length} activities
+                {Math.min(activityPage * ACTIVITY_PAGE_SIZE, activityTotal)} of {activityTotal} activities
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -257,4 +252,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-

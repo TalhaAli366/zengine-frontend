@@ -1,33 +1,44 @@
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { NextRequest } from 'next/server';
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = createServerComponentClient({ cookies });
+    const searchParams = request.nextUrl.searchParams;
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '10', 10)));
+    const sourceLimit = Math.max(20, page * limit * 2);
 
     // Fetch recent scraper runs
-    const { data: scraperRuns, error: scraperError } = await supabase
-      .from('scraper_runs')
-      .select('id, scraper_type, status, started_at, completed_at, total_results, new_influencers, updated_influencers, input_data')
-      .order('started_at', { ascending: false })
-      .limit(10);
+    const [
+      { data: scraperRuns, error: scraperError },
+      { data: outreachLogs, error: outreachError },
+      { data: campaigns, error: campaignError },
+    ] = await Promise.all([
+      supabase
+        .from('scraper_runs')
+        .select('id, scraper_type, status, started_at, completed_at, total_results, new_influencers, updated_influencers, input_data')
+        .order('started_at', { ascending: false })
+        .limit(sourceLimit),
+      supabase
+        .from('outreach_logs')
+        .select('id, campaign_id, influencer_id, channel, to_address, subject, sent_at, status')
+        .order('sent_at', { ascending: false })
+        .limit(sourceLimit),
+      supabase
+        .from('campaigns')
+        .select('id, name, status, created_at')
+        .order('created_at', { ascending: false })
+        .limit(sourceLimit),
+    ]);
 
-    // Fetch recent outreach logs
-    const { data: outreachLogs, error: outreachError } = await supabase
-      .from('outreach_logs')
-      .select('id, campaign_id, influencer_id, channel, to_address, subject, sent_at, status')
-      .order('sent_at', { ascending: false })
-      .limit(10);
-
-    // Fetch recent campaigns
-    const { data: campaigns, error: campaignError } = await supabase
-      .from('campaigns')
-      .select('id, name, status, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5);
+    if (scraperError) throw scraperError;
+    if (outreachError) throw outreachError;
+    if (campaignError) throw campaignError;
 
     // Combine and format activities
     const activities: any[] = [];
@@ -96,11 +107,20 @@ export async function GET() {
       });
     }
 
-    // Sort by timestamp (most recent first) and limit to 20
+    // Sort by timestamp (most recent first), then paginate
     activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
+    const total = activities.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
+    const paginatedActivities = activities.slice(start, start + limit);
+
     return Response.json({
-      activities: activities.slice(0, 20)
+      activities: paginatedActivities,
+      page,
+      limit,
+      total,
+      totalPages,
     });
   } catch (error: any) {
     console.error('API error:', error);

@@ -51,11 +51,41 @@ export async function GET(request: NextRequest) {
     const maxEngagementRate = searchParams.get('max_engagement_rate');
     const minAvgViews = searchParams.get('min_avg_views');
     const maxAvgViews = searchParams.get('max_avg_views');
+    const country = searchParams.get('country');
     const hashtagId = searchParams.get('hashtag_id');
     const soundId = searchParams.get('sound_id');
     const reachedOut = searchParams.get('reached_out');
     const hasEmail = searchParams.get('has_email');
     const onlyPersonalEmail = searchParams.get('only_personal_email');
+    const sortBy = searchParams.get('sort_by') || 'last_scraped';
+    const sortOrder = searchParams.get('sort_order') === 'asc' ? 'asc' : 'desc';
+    const sortAscending = sortOrder === 'asc';
+
+    const sortInfluencers = (list: any[]) => {
+      return list.sort((a, b) => {
+        if (sortBy === 'followers') {
+          const aValue = a.followers ?? 0;
+          const bValue = b.followers ?? 0;
+          return sortAscending ? aValue - bValue : bValue - aValue;
+        }
+
+        if (sortBy === 'avg_views') {
+          const aValue = a.avg_views ?? 0;
+          const bValue = b.avg_views ?? 0;
+          return sortAscending ? aValue - bValue : bValue - aValue;
+        }
+
+        if (sortBy === 'engagement_rate') {
+          const aValue = a.engagement_rate ?? 0;
+          const bValue = b.engagement_rate ?? 0;
+          return sortAscending ? aValue - bValue : bValue - aValue;
+        }
+
+        const aDate = a.last_scraped ? new Date(a.last_scraped).getTime() : 0;
+        const bDate = b.last_scraped ? new Date(b.last_scraped).getTime() : 0;
+        return sortAscending ? aDate - bDate : bDate - aDate;
+      });
+    };
 
     // Personal email domains list (non-business)
     const personalEmailDomains = [
@@ -238,6 +268,9 @@ export async function GET(request: NextRequest) {
         if (maxAvgViews) {
           dataQuery = dataQuery.lte('avg_views', parseFloat(maxAvgViews));
         }
+        if (country) {
+          dataQuery = dataQuery.ilike('country', `%${country}%`);
+        }
         if (reachedOut === 'true') {
           dataQuery = dataQuery.eq('has_outreach', true);
         } else if (reachedOut === 'false') {
@@ -309,12 +342,7 @@ export async function GET(request: NextRequest) {
 
       console.log(`[INFLUENCERS API] Total matching influencers fetched: ${allMatchingInfluencers.length}, total count: ${totalCount}`);
 
-      // Sort all data by last_scraped
-      allMatchingInfluencers.sort((a, b) => {
-        const aDate = a.last_scraped ? new Date(a.last_scraped).getTime() : 0;
-        const bDate = b.last_scraped ? new Date(b.last_scraped).getTime() : 0;
-        return bDate - aDate; // Descending
-      });
+      sortInfluencers(allMatchingInfluencers);
 
       // Apply pagination
       const paginatedData = allMatchingInfluencers.slice(offset, offset + limit);
@@ -387,6 +415,9 @@ export async function GET(request: NextRequest) {
           if (maxAvgViews) {
             chunkQuery = chunkQuery.lte('avg_views', parseFloat(maxAvgViews));
           }
+          if (country) {
+            chunkQuery = chunkQuery.ilike('country', `%${country}%`);
+          }
           if (reachedOut === 'true') {
             chunkQuery = chunkQuery.eq('has_outreach', true);
           } else if (reachedOut === 'false') {
@@ -451,12 +482,7 @@ export async function GET(request: NextRequest) {
         const totalCount = allMatchingInfluencers.length;
         console.log(`[INFLUENCERS API] Total matching influencers fetched: ${allMatchingInfluencers.length}, total count: ${totalCount}`);
 
-        // Sort all data by last_scraped
-        allMatchingInfluencers.sort((a, b) => {
-          const aDate = a.last_scraped ? new Date(a.last_scraped).getTime() : 0;
-          const bDate = b.last_scraped ? new Date(b.last_scraped).getTime() : 0;
-          return bDate - aDate; // Descending
-        });
+        sortInfluencers(allMatchingInfluencers);
 
         // Apply pagination
         const paginatedData = allMatchingInfluencers.slice(offset, offset + limit);
@@ -485,7 +511,7 @@ export async function GET(request: NextRequest) {
         console.log(`[INFLUENCERS API] Using simple path with ${influencerIds.length} influencer IDs`);
         query = supabase
           .from('influencers')
-          .select('*', { count: 'exact' })
+          .select('*')
           .in('id', influencerIds);
       }
     } else if (onlyPersonalEmail === 'true') {
@@ -529,13 +555,14 @@ export async function GET(request: NextRequest) {
         if (maxAvgViews) {
           batchQuery = batchQuery.lte('avg_views', parseFloat(maxAvgViews));
         }
+        if (country) {
+          batchQuery = batchQuery.ilike('country', `%${country}%`);
+        }
         if (reachedOut === 'true') {
           batchQuery = batchQuery.eq('has_outreach', true);
         } else if (reachedOut === 'false') {
           batchQuery = batchQuery.eq('has_outreach', false);
         }
-
-        batchQuery = batchQuery.order('last_scraped', { ascending: false });
 
         const { data: batchData, error: batchError } = await batchQuery.range(batchOffset, batchOffset + batchSize - 1);
 
@@ -560,6 +587,8 @@ export async function GET(request: NextRequest) {
       }
 
       console.log(`[INFLUENCERS API] Found ${allMatchingInfluencers.length} influencers with personal emails`);
+
+      sortInfluencers(allMatchingInfluencers);
 
       // Apply pagination
       const paginatedData = allMatchingInfluencers.slice(offset, offset + limit);
@@ -587,7 +616,7 @@ export async function GET(request: NextRequest) {
       console.log(`[INFLUENCERS API] Building query without influencer ID filter`);
       query = supabase
         .from('influencers')
-        .select('*', { count: 'exact' });
+        .select('*');
     }
 
     // Apply search filter
@@ -622,6 +651,10 @@ export async function GET(request: NextRequest) {
       query = query.lte('avg_views', parseFloat(maxAvgViews));
     }
 
+    if (country) {
+      query = query.ilike('country', `%${country}%`);
+    }
+
     // Filter by outreach status
     if (reachedOut === 'true') {
       query = query.eq('has_outreach', true);
@@ -633,8 +666,11 @@ export async function GET(request: NextRequest) {
       query = query.not('email', 'is', null).not('email', 'eq', '');
     }
 
-    // Order by last_scraped
-    query = query.order('last_scraped', { ascending: false });
+    if (sortBy === 'followers' || sortBy === 'avg_views' || sortBy === 'engagement_rate') {
+      query = query.order(sortBy, { ascending: sortAscending, nullsFirst: false });
+    } else {
+      query = query.order('last_scraped', { ascending: sortAscending });
+    }
 
     // Get total count with same filters (before pagination)
     let countQuery = supabase
@@ -665,6 +701,9 @@ export async function GET(request: NextRequest) {
     }
     if (maxAvgViews) {
       countQuery = countQuery.lte('avg_views', parseFloat(maxAvgViews));
+    }
+    if (country) {
+      countQuery = countQuery.ilike('country', `%${country}%`);
     }
     if (reachedOut === 'true') {
       countQuery = countQuery.eq('has_outreach', true);
@@ -697,11 +736,7 @@ export async function GET(request: NextRequest) {
       influencers = result.data || [];
       queryError = result.error;
 
-      // If we got data but no count from count query, use the count from main query
-      if (count === 0 && result.count !== null && result.count !== undefined) {
-        count = result.count;
-        console.log(`[INFLUENCERS API] Using count from main query: ${count}`);
-      }
+      // count comes from countQuery only; main query is data-only for performance
     } catch (err: any) {
       console.error(`[INFLUENCERS API] Main query execution error:`, err);
       queryError = err;
@@ -1038,4 +1073,3 @@ export async function PATCH(request: NextRequest) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 }
-

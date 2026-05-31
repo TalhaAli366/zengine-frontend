@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Users, Search, Filter, X, Trash2, ChevronLeft, ChevronRight, MapPin, BarChart3, TrendingUp, CalendarDays, DollarSign, Edit2, ChevronUp, ChevronDown } from 'lucide-react';
 import { detectRegion } from '@/lib/api';
@@ -59,6 +59,28 @@ interface OutreachSelectionInfluencer {
   engagement_rate?: number;
 }
 
+interface AnalyticsResponse {
+  summary: {
+    totalInfluencers: number;
+    avgEngagementRate: number;
+    totalFollowers: number;
+    countriesCount: number;
+  };
+  topPerformers: Array<{ name: string; engagement: number; followers: number }>;
+  engagementDistribution: Array<{ range: string; count: number }>;
+  countryDistribution: Array<{ name: string; value: number }>;
+  scatterData: Array<{ followers: number; engagement: number }>;
+  followerDistribution: Array<{ range: string; count: number }>;
+  outreachByEmployee: Array<{ name: string; value: number }>;
+  meta?: {
+    scatterSampled?: boolean;
+    scatterSampleLimit?: number;
+  };
+}
+
+type InfluencerSortField = 'followers' | 'engagement_rate' | 'avg_views';
+type SortOrder = 'asc' | 'desc';
+
 export default function InfluencersPage() {
   const router = useRouter();
   const [exporting, setExporting] = useState(false);
@@ -66,7 +88,7 @@ export default function InfluencersPage() {
   const [error, setError] = useState<string | null>(null);
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
   const [allInfluencers, setAllInfluencers] = useState<Influencer[]>([]);
-  const [analyticsInfluencers, setAnalyticsInfluencers] = useState<Influencer[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsResponse | null>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [loadingInfluencers, setLoadingInfluencers] = useState(true);
   const [activeTab, setActiveTab] = useState<'list' | 'visualizations'>('list');
@@ -82,6 +104,7 @@ export default function InfluencersPage() {
   const [maxAvgViews, setMaxAvgViews] = useState('');
   const [selectedHashtag, setSelectedHashtag] = useState('');
   const [selectedSound, setSelectedSound] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState('');
   const [reachedOutFilter, setReachedOutFilter] = useState('');
   const [onlyWithEmail, setOnlyWithEmail] = useState(false);
   const [onlyPersonalEmail, setOnlyPersonalEmail] = useState(false);
@@ -97,6 +120,7 @@ export default function InfluencersPage() {
   const [appliedMaxAvgViews, setAppliedMaxAvgViews] = useState('');
   const [appliedSelectedHashtag, setAppliedSelectedHashtag] = useState('');
   const [appliedSelectedSound, setAppliedSelectedSound] = useState('');
+  const [appliedSelectedCountry, setAppliedSelectedCountry] = useState('');
   const [appliedReachedOutFilter, setAppliedReachedOutFilter] = useState('');
   const [appliedOnlyWithEmail, setAppliedOnlyWithEmail] = useState(false);
   const [appliedOnlyPersonalEmail, setAppliedOnlyPersonalEmail] = useState(false);
@@ -133,6 +157,8 @@ export default function InfluencersPage() {
   const [itemsPerPage] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [sortBy, setSortBy] = useState<InfluencerSortField>('followers');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   const currencyFormatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -166,6 +192,7 @@ export default function InfluencersPage() {
     setAppliedMaxAvgViews(maxAvgViews);
     setAppliedSelectedHashtag(selectedHashtag);
     setAppliedSelectedSound(selectedSound);
+    setAppliedSelectedCountry(selectedCountry);
     setAppliedReachedOutFilter(reachedOutFilter);
     setAppliedOnlyWithEmail(onlyWithEmail);
     setAppliedOnlyPersonalEmail(onlyPersonalEmail);
@@ -176,7 +203,7 @@ export default function InfluencersPage() {
     loadCampaigns();
     loadFilters();
     loadInfluencers();
-  }, [currentPage, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail]); // Reload when page or applied filters change
+  }, [currentPage, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedSelectedCountry, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail, sortBy, sortOrder]); // Reload when page, sorting, or applied filters change
 
   // Scroll position detection for scroll buttons
   useEffect(() => {
@@ -207,10 +234,10 @@ export default function InfluencersPage() {
 
   // Load all influencers for analytics when switching to visualizations tab
   useEffect(() => {
-    if (activeTab === 'visualizations' && analyticsInfluencers.length === 0 && !loadingAnalytics) {
+    if (activeTab === 'visualizations' && !analyticsData && !loadingAnalytics) {
       loadAllInfluencersForAnalytics();
     }
-  }, [activeTab]);
+  }, [activeTab, analyticsData, loadingAnalytics]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -252,6 +279,7 @@ export default function InfluencersPage() {
       maxAvgViews: appliedMaxAvgViews,
       hashtag: appliedSelectedHashtag,
       sound: appliedSelectedSound,
+      country: appliedSelectedCountry,
       reachedOut: appliedReachedOutFilter,
       onlyWithEmail: appliedOnlyWithEmail,
       onlyPersonalEmail: appliedOnlyPersonalEmail,
@@ -267,7 +295,7 @@ export default function InfluencersPage() {
     }
 
     prevFiltersRef.current = filterSignature;
-  }, [loadingInfluencers, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail, selectedInfluencerIds.length]);
+  }, [loadingInfluencers, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedSelectedCountry, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail, selectedInfluencerIds.length]);
 
   // Sync influencers state when allInfluencers changes (from API response)
   useEffect(() => {
@@ -319,9 +347,12 @@ export default function InfluencersPage() {
       if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
       if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
       if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
+      if (appliedSelectedCountry) params.append('country', appliedSelectedCountry);
       if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
       if (appliedOnlyWithEmail) params.append('has_email', 'true');
       if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
+      params.append('sort_by', sortBy);
+      params.append('sort_order', sortOrder);
 
       const url = `/api/influencers?${params.toString()}`;
       const response = await fetch(url);
@@ -350,60 +381,30 @@ export default function InfluencersPage() {
   const loadAllInfluencersForAnalytics = async () => {
     try {
       setLoadingAnalytics(true);
-      const allData: Influencer[] = [];
-      let page = 1;
-      let hasMore = true;
-      const limit = 1000; // Large page size to minimize requests
+      const params = new URLSearchParams();
 
-      while (hasMore) {
-        const params = new URLSearchParams();
-        params.append('page', page.toString());
-        params.append('limit', limit.toString());
+      if (appliedSelectedCampaign) params.append('campaign', appliedSelectedCampaign);
+      if (appliedSearchQuery) params.append('search', appliedSearchQuery);
+      if (appliedMinFollowers) params.append('min_followers', appliedMinFollowers);
+      if (appliedMaxFollowers) params.append('max_followers', appliedMaxFollowers);
+      if (appliedMinEngagementRate) params.append('min_engagement_rate', appliedMinEngagementRate);
+      if (appliedMaxEngagementRate) params.append('max_engagement_rate', appliedMaxEngagementRate);
+      if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
+      if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
+      if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
+      if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
+      if (appliedSelectedCountry) params.append('country', appliedSelectedCountry);
+      if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
+      if (appliedOnlyWithEmail) params.append('has_email', 'true');
+      if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
 
-        // Apply filters if any (for consistency - use applied filters)
-        if (appliedSelectedCampaign) params.append('campaign', appliedSelectedCampaign);
-        if (appliedSearchQuery) params.append('search', appliedSearchQuery);
-        if (appliedMinFollowers) params.append('min_followers', appliedMinFollowers);
-        if (appliedMaxFollowers) params.append('max_followers', appliedMaxFollowers);
-        if (appliedMinEngagementRate) params.append('min_engagement_rate', appliedMinEngagementRate);
-        if (appliedMaxEngagementRate) params.append('max_engagement_rate', appliedMaxEngagementRate);
-        if (appliedMinAvgViews) params.append('min_avg_views', appliedMinAvgViews);
-        if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
-        if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
-        if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
-        if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
-        if (appliedOnlyWithEmail) params.append('has_email', 'true');
-        if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
-
-        const url = `/api/influencers?${params.toString()}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Failed to load');
-        const result = await response.json();
-
-        let pageData: Influencer[] = [];
-        if (Array.isArray(result)) {
-          pageData = result;
-        } else {
-          pageData = result.data || [];
-        }
-
-        if (pageData.length > 0) {
-          allData.push(...pageData);
-          // If we got less than the limit, we've reached the end
-          if (pageData.length < limit) {
-            hasMore = false;
-          } else {
-            page++;
-          }
-        } else {
-          hasMore = false;
-        }
-      }
-
-      setAnalyticsInfluencers(allData);
+      const response = await fetch(`/api/influencers/analytics?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to load analytics');
+      const result = await response.json();
+      setAnalyticsData(result);
     } catch (err) {
       console.error('Error loading all influencers for analytics:', err);
-      setAnalyticsInfluencers([]);
+      setAnalyticsData(null);
     } finally {
       setLoadingAnalytics(false);
     }
@@ -559,6 +560,7 @@ export default function InfluencersPage() {
     setMaxAvgViews('');
     setSelectedHashtag('');
     setSelectedSound('');
+    setSelectedCountry('');
     setReachedOutFilter('');
     setOnlyWithEmail(false);
     setOnlyPersonalEmail(false);
@@ -573,6 +575,7 @@ export default function InfluencersPage() {
     setAppliedMaxAvgViews('');
     setAppliedSelectedHashtag('');
     setAppliedSelectedSound('');
+    setAppliedSelectedCountry('');
     setAppliedReachedOutFilter('');
     setAppliedOnlyWithEmail(false);
     setAppliedOnlyPersonalEmail(false);
@@ -580,7 +583,7 @@ export default function InfluencersPage() {
     // loadInfluencers will be called automatically via useEffect when applied filters change
   };
 
-  const hasActiveFilters = appliedSearchQuery || appliedSelectedCampaign || appliedMinFollowers || appliedMaxFollowers || appliedMinEngagementRate || appliedMaxEngagementRate || appliedMinAvgViews || appliedMaxAvgViews || appliedSelectedHashtag || appliedSelectedSound || appliedReachedOutFilter || appliedOnlyWithEmail || appliedOnlyPersonalEmail;
+  const hasActiveFilters = appliedSearchQuery || appliedSelectedCampaign || appliedMinFollowers || appliedMaxFollowers || appliedMinEngagementRate || appliedMaxEngagementRate || appliedMinAvgViews || appliedMaxAvgViews || appliedSelectedHashtag || appliedSelectedSound || appliedSelectedCountry || appliedReachedOutFilter || appliedOnlyWithEmail || appliedOnlyPersonalEmail;
   const hasSelection = selectedInfluencerIds.length > 0;
   const pageSelectionCount = influencers.filter(inf => selectedInfluencerIds.includes(inf.id)).length;
   const allPageSelected = influencers.length > 0 && pageSelectionCount === influencers.length;
@@ -591,6 +594,26 @@ export default function InfluencersPage() {
       // Scroll to top when page changes
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const handleSort = (field: InfluencerSortField) => {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortOrder('desc');
+    }
+    setCurrentPage(1);
+  };
+
+  const renderSortIndicator = (field: InfluencerSortField) => {
+    if (sortBy !== field) {
+      return <ChevronDown className="w-3.5 h-3.5 text-gray-300" />;
+    }
+
+    return sortOrder === 'asc'
+      ? <ChevronUp className="w-3.5 h-3.5 text-primary-600" />
+      : <ChevronDown className="w-3.5 h-3.5 text-primary-600" />;
   };
 
 
@@ -611,6 +634,7 @@ export default function InfluencersPage() {
       if (appliedMaxAvgViews) params.append('max_avg_views', appliedMaxAvgViews);
       if (appliedSelectedHashtag) params.append('hashtag_id', appliedSelectedHashtag);
       if (appliedSelectedSound) params.append('sound_id', appliedSelectedSound);
+      if (appliedSelectedCountry) params.append('country', appliedSelectedCountry);
       if (appliedReachedOutFilter) params.append('reached_out', appliedReachedOutFilter);
       if (appliedOnlyWithEmail) params.append('has_email', 'true');
       if (appliedOnlyPersonalEmail) params.append('only_personal_email', 'true');
@@ -985,6 +1009,25 @@ export default function InfluencersPage() {
                   </select>
                 </div>
 
+                {/* Country Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Country
+                  </label>
+                  <input
+                    type="text"
+                    value={selectedCountry}
+                    onChange={(e) => setSelectedCountry(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        applyFilters();
+                      }
+                    }}
+                    placeholder="e.g. United States"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
                 {/* Min Followers */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1066,7 +1109,7 @@ export default function InfluencersPage() {
                 {/* Min Avg Views */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Min Avg Views
+                    Min Median Views
                   </label>
                   <input
                     type="number"
@@ -1085,7 +1128,7 @@ export default function InfluencersPage() {
                 {/* Max Avg Views */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Max Avg Views
+                    Max Median Views
                   </label>
                   <input
                     type="number"
@@ -1191,7 +1234,7 @@ export default function InfluencersPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Average Views</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Median Views</label>
                       <input
                         type="number"
                         min="0"
@@ -1298,9 +1341,25 @@ export default function InfluencersPage() {
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Username</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Display Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Followers</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Engagement</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Avg Views</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
+                        <button onClick={() => handleSort('followers')} className="inline-flex items-center gap-1 hover:text-gray-900">
+                          Followers
+                          {renderSortIndicator('followers')}
+                        </button>
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
+                        <button onClick={() => handleSort('engagement_rate')} className="inline-flex items-center gap-1 hover:text-gray-900">
+                          Engagement
+                          {renderSortIndicator('engagement_rate')}
+                        </button>
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">
+                        <button onClick={() => handleSort('avg_views')} className="inline-flex items-center gap-1 hover:text-gray-900">
+                          Median Views
+                          {renderSortIndicator('avg_views')}
+                        </button>
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Profile</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Video Metrics</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Campaigns</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Country</th>
@@ -1309,7 +1368,6 @@ export default function InfluencersPage() {
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Reached By</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Email</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Type</th>
-                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Profile</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
                     </tr>
                   </thead>
@@ -1330,6 +1388,24 @@ export default function InfluencersPage() {
                         <td className="px-6 py-4 text-sm text-gray-600">{influencer.followers?.toLocaleString() || '-'}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{influencer.engagement_rate ? `${influencer.engagement_rate}%` : '-'}</td>
                         <td className="px-6 py-4 text-sm text-gray-600">{influencer.avg_views ? influencer.avg_views.toLocaleString() : '-'}</td>
+                        <td className="px-6 py-4 text-sm">
+                          {(() => {
+                            const profileUrl = influencer.profile_url ||
+                              influencer.metadata?.raw_author?.profileUrl ||
+                              `https://www.tiktok.com/@${influencer.username}`;
+
+                            return (
+                              <a
+                                href={profileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                              >
+                                Profile Link
+                              </a>
+                            );
+                          })()}
+                        </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
                           {(() => {
                             const videoMetrics = influencer.metadata?.video_metrics;
@@ -1464,25 +1540,6 @@ export default function InfluencersPage() {
                           )}
                         </td>
                         <td className="px-6 py-4 text-sm">
-                          {(() => {
-                            // Get profile URL from profile_url field or metadata
-                            const profileUrl = influencer.profile_url ||
-                              influencer.metadata?.raw_author?.profileUrl ||
-                              `https://www.tiktok.com/@${influencer.username}`;
-
-                            return (
-                              <a
-                                href={profileUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                              >
-                                Profile Link
-                              </a>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-6 py-4 text-sm">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => openEditModal(influencer)}
@@ -1609,7 +1666,7 @@ export default function InfluencersPage() {
                 <p className="text-gray-500">Loading analytics data...</p>
                 <p className="text-sm text-gray-400 mt-2">This may take a moment for large datasets</p>
               </div>
-            ) : analyticsInfluencers.length === 0 ? (
+            ) : !analyticsData || analyticsData.summary.totalInfluencers === 0 ? (
               <div className="text-center py-12">
                 <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-500">No data available for visualizations</p>
@@ -1617,31 +1674,33 @@ export default function InfluencersPage() {
               </div>
             ) : (
               <div className="space-y-8">
+                {analyticsData.meta?.scatterSampled && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Scatter plot is sampled from the latest {analyticsData.meta.scatterSampleLimit?.toLocaleString()} records for faster loading.
+                  </div>
+                )}
                 {/* Summary Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                     <div className="text-sm text-blue-600 font-medium">Total Influencers</div>
-                    <div className="text-2xl font-bold text-blue-900 mt-1">{analyticsInfluencers.length}</div>
+                    <div className="text-2xl font-bold text-blue-900 mt-1">{analyticsData.summary.totalInfluencers}</div>
                   </div>
                   <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                     <div className="text-sm text-green-600 font-medium">Avg Engagement Rate</div>
                     <div className="text-2xl font-bold text-green-900 mt-1">
-                      {(() => {
-                        const rates = analyticsInfluencers.filter(inf => inf.engagement_rate).map(inf => inf.engagement_rate || 0);
-                        return rates.length > 0 ? `${(rates.reduce((a, b) => a + b, 0) / rates.length).toFixed(2)}%` : '0.00%';
-                      })()}
+                      {`${analyticsData.summary.avgEngagementRate.toFixed(2)}%`}
                     </div>
                   </div>
                   <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
                     <div className="text-sm text-purple-600 font-medium">Total Followers</div>
                     <div className="text-2xl font-bold text-purple-900 mt-1">
-                      {(analyticsInfluencers.reduce((sum, inf) => sum + (inf.followers || 0), 0) / 1000000).toFixed(1)}M
+                      {(analyticsData.summary.totalFollowers / 1000000).toFixed(1)}M
                     </div>
                   </div>
                   <div className="bg-orange-50 rounded-lg p-4 border border-orange-200">
                     <div className="text-sm text-orange-600 font-medium">Countries</div>
                     <div className="text-2xl font-bold text-orange-900 mt-1">
-                      {new Set(analyticsInfluencers.map(inf => inf.country).filter(Boolean)).size}
+                      {analyticsData.summary.countriesCount}
                     </div>
                   </div>
                 </div>
@@ -1650,15 +1709,7 @@ export default function InfluencersPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Performers by Engagement Rate</h3>
                   <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={analyticsInfluencers
-                      .filter(inf => inf.engagement_rate)
-                      .sort((a, b) => (b.engagement_rate || 0) - (a.engagement_rate || 0))
-                      .slice(0, 10)
-                      .map(inf => ({
-                        name: inf.username?.substring(0, 15) || 'Unknown',
-                        engagement: inf.engagement_rate || 0,
-                        followers: (inf.followers || 0) / 1000 // in thousands
-                      }))}>
+                    <BarChart data={analyticsData.topPerformers}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} />
                       <YAxis />
@@ -1673,21 +1724,7 @@ export default function InfluencersPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Engagement Rate Distribution</h3>
                   <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={(() => {
-                      const buckets = [0, 1, 2, 3, 5, 10, 20, 50];
-                      const counts = buckets.map((_, i) => ({
-                        range: i === 0 ? '0-1%' :
-                          i === buckets.length - 1 ? `${buckets[i - 1]}+%` :
-                            `${buckets[i - 1]}-${buckets[i]}%`,
-                        count: analyticsInfluencers.filter(inf => {
-                          const rate = inf.engagement_rate || 0;
-                          if (i === 0) return rate >= 0 && rate < 1;
-                          if (i === buckets.length - 1) return rate >= buckets[i - 1];
-                          return rate >= buckets[i - 1] && rate < buckets[i];
-                        }).length
-                      }));
-                      return counts;
-                    })()}>
+                    <BarChart data={analyticsData.engagementDistribution}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="range" />
                       <YAxis />
@@ -1703,17 +1740,7 @@ export default function InfluencersPage() {
                   <ResponsiveContainer width="100%" height={400}>
                     <PieChart>
                       <Pie
-                        data={(() => {
-                          const countryCounts: Record<string, number> = {};
-                          analyticsInfluencers.forEach(inf => {
-                            const country = inf.country || 'Unknown';
-                            countryCounts[country] = (countryCounts[country] || 0) + 1;
-                          });
-                          return Object.entries(countryCounts)
-                            .sort((a, b) => b[1] - a[1])
-                            .slice(0, 10)
-                            .map(([name, value]) => ({ name, value }));
-                        })()}
+                        data={analyticsData.countryDistribution}
                         cx="50%"
                         cy="50%"
                         labelLine={false}
@@ -1756,12 +1783,7 @@ export default function InfluencersPage() {
                       <Tooltip cursor={{ strokeDasharray: '3 3' }} />
                       <Scatter
                         name="Influencers"
-                        data={analyticsInfluencers
-                          .filter(inf => inf.engagement_rate && inf.followers && inf.followers > 0)
-                          .map(inf => ({
-                            followers: inf.followers || 0,
-                            engagement: inf.engagement_rate || 0
-                          }))}
+                        data={analyticsData.scatterData}
                         fill="#3b82f6"
                       />
                     </ScatterChart>
@@ -1772,20 +1794,7 @@ export default function InfluencersPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Follower Distribution</h3>
                   <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={(() => {
-                      const buckets = [0, 10000, 50000, 100000, 500000, 1000000, 5000000];
-                      return buckets.map((_, i) => ({
-                        range: i === 0 ? '0-10K' :
-                          i === buckets.length - 1 ? `${buckets[i - 1] / 1000}K+` :
-                            `${buckets[i - 1] / 1000}K-${buckets[i] / 1000}K`,
-                        count: analyticsInfluencers.filter(inf => {
-                          const followers = inf.followers || 0;
-                          if (i === 0) return followers >= 0 && followers < 10000;
-                          if (i === buckets.length - 1) return followers >= buckets[i - 1];
-                          return followers >= buckets[i - 1] && followers < buckets[i];
-                        }).length
-                      }));
-                    })()}>
+                    <BarChart data={analyticsData.followerDistribution}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="range" />
                       <YAxis />
@@ -1800,17 +1809,7 @@ export default function InfluencersPage() {
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Creators Approached by Employee</h3>
                   <ResponsiveContainer width="100%" height={400}>
                     <BarChart
-                      data={(() => {
-                        const employeeCounts: Record<string, number> = {};
-                        analyticsInfluencers.forEach(inf => {
-                          const employee = inf.reached_by || 'Unassigned';
-                          employeeCounts[employee] = (employeeCounts[employee] || 0) + 1;
-                        });
-                        return Object.entries(employeeCounts)
-                          .sort((a, b) => b[1] - a[1])
-                          .slice(0, 15)
-                          .map(([name, value]) => ({ name, value }));
-                      })()}
+                      data={analyticsData.outreachByEmployee}
                       layout="vertical"
                     >
                       <CartesianGrid strokeDasharray="3 3" />

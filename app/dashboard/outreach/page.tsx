@@ -2,6 +2,10 @@
 
 import { useState, useEffect, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import EmailPreviewModal from '../../../components/EmailPreviewModal';
+
+const RichTextEditor = dynamic(() => import('../../../components/RichTextEditor'), { ssr: false });
 
 interface EmailTemplate {
   id: string;
@@ -33,6 +37,7 @@ interface OutreachLog {
   campaign_id?: string;
   influencer_id?: string;
   channel: string;
+  from_address?: string;
   to_address: string;
   subject: string;
   body: string;
@@ -94,6 +99,20 @@ export default function OutreachPage() {
   const [templateName, setTemplateName] = useState('');
   const [templateSubject, setTemplateSubject] = useState('');
   const [templateBody, setTemplateBody] = useState('');
+
+  // Template editing
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+
+  // Email preview
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewConfig, setPreviewConfig] = useState<{
+    templateId?: string;
+    subject?: string;
+    body?: string;
+    influencerId?: string;
+    campaignId?: string;
+  }>({});
 
   // Outreach logs
   const [outreachLogs, setOutreachLogs] = useState<OutreachLog[]>([]);
@@ -529,6 +548,66 @@ export default function OutreachPage() {
     return campaign ? campaign.name : 'Unknown Campaign';
   };
 
+  const handlePreview = (config: {
+    templateId?: string;
+    subject?: string;
+    body?: string;
+    influencerId?: string;
+    campaignId?: string;
+  }) => {
+    setPreviewConfig(config);
+    setShowPreview(true);
+  };
+
+  const startEditTemplate = (template: EmailTemplate) => {
+    setEditingTemplateId(template.id);
+    setIsEditing(true);
+    setTemplateName(template.name);
+    setTemplateSubject(template.subject);
+    setTemplateBody(template.body);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelEditTemplate = () => {
+    setEditingTemplateId(null);
+    setIsEditing(false);
+    setTemplateName('');
+    setTemplateSubject('');
+    setTemplateBody('');
+  };
+
+  const updateTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTemplateId) return;
+    setLoading(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/v1/outreach/templates/${editingTemplateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: templateName,
+          subject: templateSubject,
+          body: templateBody,
+        }),
+      });
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Template updated successfully!' });
+        cancelEditTemplate();
+        loadTemplates();
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.detail || 'Failed to update template' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
@@ -705,21 +784,41 @@ export default function OutreachPage() {
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading || selectedInfluencers.length === 0}
-                  className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                >
-                  {loading ? 'Sending...' : `Send to ${selectedInfluencers.length} Influencer(s)`}
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="submit"
+                    disabled={loading || selectedInfluencers.length === 0}
+                    className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {loading ? 'Sending...' : `Send to ${selectedInfluencers.length} Influencer(s)`}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedTemplate || selectedInfluencers.length === 0}
+                    onClick={() => {
+                      const firstInf = selectedInfluencers.length > 0
+                        ? influencers.find(inf => (inf.id || `order-${inf.email}`) === selectedInfluencers[0])
+                        : undefined;
+                      handlePreview({
+                        templateId: selectedTemplate,
+                        influencerId: firstInf?.id && !firstInf.id.startsWith('order-') ? firstInf.id : undefined,
+                      });
+                    }}
+                    className="flex-1 bg-white text-gray-700 py-3 rounded-lg font-medium hover:bg-gray-50 border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Preview Before Sending
+                  </button>
+                </div>
               </form>
             )}
 
             {activeTab === 'templates' && (
               <div className="space-y-8">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Template</h3>
-                  <form onSubmit={createTemplate} className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    {isEditing ? 'Edit Template' : 'Create New Template'}
+                  </h3>
+                  <form onSubmit={isEditing ? updateTemplate : createTemplate} className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Template Name
@@ -750,15 +849,12 @@ export default function OutreachPage() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Email Body (HTML supported)
+                        Email Body
                       </label>
-                      <textarea
+                      <RichTextEditor
                         value={templateBody}
-                        onChange={(e) => setTemplateBody(e.target.value)}
-                        placeholder="Hi {{display_name}},&#10;&#10;We'd love to collaborate with you on our {{campaign_name}} campaign. Based on your {{avg_views}} average views and {{engagement_rate}}% engagement..."
-                        rows={8}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                        required
+                        onChange={setTemplateBody}
+                        placeholder="Hi {{display_name}}, We'd love to collaborate with you on our {{campaign_name}} campaign..."
                       />
                       <div className="mt-3 text-xs text-gray-500 border border-dashed border-gray-300 rounded-lg p-3 bg-gray-50">
                         <p className="font-semibold text-gray-700">Available placeholders</p>
@@ -774,13 +870,37 @@ export default function OutreachPage() {
                       </div>
                     </div>
 
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {loading ? 'Creating...' : 'Create Template'}
-                    </button>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {loading ? (isEditing ? 'Updating...' : 'Creating...') : (isEditing ? 'Update Template' : 'Create Template')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!templateBody}
+                        onClick={() => {
+                          handlePreview({
+                            subject: templateSubject,
+                            body: templateBody,
+                          });
+                        }}
+                        className="flex-1 bg-white text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-50 border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Preview Email
+                      </button>
+                      {isEditing && (
+                        <button
+                          type="button"
+                          onClick={cancelEditTemplate}
+                          className="flex-1 bg-white text-gray-500 py-2 rounded-lg font-medium hover:bg-gray-50 border border-gray-200 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </form>
                 </div>
 
@@ -793,24 +913,43 @@ export default function OutreachPage() {
                       {templates.map(template => (
                         <div key={template.id} className="border border-gray-200 rounded-lg p-4">
                           <div className="flex justify-between items-start">
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                               <h4 className="font-medium text-gray-900">{template.name}</h4>
                               <p className="text-sm text-gray-600 mt-1">
                                 <strong>Subject:</strong> {template.subject}
                               </p>
                               <p className="text-sm text-gray-500 mt-2 truncate">
-                                {template.body.substring(0, 100)}...
+                                {template.body.replace(/<[^>]*>/g, '').substring(0, 120)}...
                               </p>
                             </div>
-                            <div className="flex items-center gap-2 ml-4">
+                            <div className="flex items-center gap-1.5 ml-4 flex-shrink-0">
                               {template.is_default && (
                                 <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
                                   Default
                                 </span>
                               )}
                               <button
+                                onClick={() => handlePreview({ templateId: template.id })}
+                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Preview email"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => startEditTemplate(template)}
+                                className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                                title="Edit template"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                              <button
                                 onClick={() => deleteTemplate(template.id)}
-                                className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition-colors"
+                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                 title="Delete template"
                               >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -855,6 +994,7 @@ export default function OutreachPage() {
                       <table className="w-full">
                         <thead className="bg-gray-50 border-b border-gray-200">
                           <tr>
+                            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">From</th>
                             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Recipient</th>
                             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Subject</th>
                             <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
@@ -865,6 +1005,9 @@ export default function OutreachPage() {
                         <tbody className="divide-y divide-gray-200">
                           {outreachLogs.map((log) => (
                             <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 text-sm text-gray-600">
+                                {log.from_address || '-'}
+                              </td>
                               <td className="px-6 py-4 text-sm text-gray-600">
                                 {log.to_address || '-'}
                               </td>
@@ -1046,6 +1189,16 @@ export default function OutreachPage() {
           </div>
         </div>
       </div>
+
+      <EmailPreviewModal
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        templateId={previewConfig.templateId}
+        subject={previewConfig.subject}
+        body={previewConfig.body}
+        influencerId={previewConfig.influencerId}
+        campaignId={previewConfig.campaignId}
+      />
     </div>
   );
 }

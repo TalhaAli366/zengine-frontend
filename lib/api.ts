@@ -55,6 +55,14 @@ export interface Activity {
   metadata?: any;
 }
 
+export interface ActivitiesResponse {
+  activities: Activity[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 // Influencer API calls
 export async function getInfluencers(): Promise<Influencer[]> {
   try {
@@ -211,9 +219,14 @@ export async function detectRegion(influencerIds: string[]): Promise<{ status: s
   }
 }
 
-export async function getRecentActivities(): Promise<Activity[]> {
+export async function getRecentActivities(page: number = 1, limit: number = 10): Promise<ActivitiesResponse> {
   try {
-    const response = await fetch(`/api/activities`, {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+
+    const response = await fetch(`/api/activities?${params.toString()}`, {
       headers: {
         'Content-Type': 'application/json',
       },
@@ -221,10 +234,21 @@ export async function getRecentActivities(): Promise<Activity[]> {
 
     if (!response.ok) throw new Error('Failed to fetch activities');
     const data = await response.json();
-    return data.activities || [];
+    return {
+      activities: data.activities || [],
+      page: data.page || page,
+      limit: data.limit || limit,
+      total: data.total || 0,
+      totalPages: data.totalPages || 1,
+    };
   } catch (error) {
     console.error('Error fetching activities:', error);
-    return [];
+    return {
+      activities: [],
+      page,
+      limit,
+      total: 0,
+      totalPages: 1,
+    };
   }
 }
-
