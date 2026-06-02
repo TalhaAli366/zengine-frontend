@@ -755,15 +755,15 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
     // Fire campaign_influencers and orders IN PARALLEL since they're independent
     const tParallel = Date.now();
     const [campaignLinksResult, orderRowsResult] = await Promise.all([
-      supabase
-        .from('campaign_influencers')
-        .select('influencer_id, campaign_id')
-        .in('influencer_id', influencerIds),
-      supabase
-        .from('reference_order_overview')
-        .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
-        .in('influencer_id', influencerIds),
-    ]);
+        supabase
+          .from('campaign_influencers')
+          .select('influencer_id, campaign_id')
+          .in('influencer_id', influencerIds),
+        supabase
+          .from('reference_orders')
+          .select('influencer_id, date_paid, price_per_video, owner_name, created_at')
+          .in('influencer_id', influencerIds),
+      ]);
     console.log(`[INFLUENCERS API] fetchAssociations - parallel (campaign_links + orders): ${Date.now() - tParallel}ms`);
 
     const { data: campaignLinks, error: linkError } = campaignLinksResult;
@@ -771,8 +771,24 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
 
     if (!orderError && orderRows) {
       orderRows.forEach((row: any) => {
-        if (row.influencer_id) {
-          orderMap[row.influencer_id] = row;
+        if (!row.influencer_id) return;
+        const current = orderMap[row.influencer_id];
+        const rowDate = row.date_paid ? new Date(row.date_paid).getTime() : 0;
+        const currentDate = current?.date_paid ? new Date(current.date_paid).getTime() : 0;
+        const rowCreated = row.created_at ? new Date(row.created_at).getTime() : 0;
+        const currentCreated = current?.created_at ? new Date(current.created_at).getTime() : 0;
+        const totalOrders = (current?.total_orders || 0) + 1;
+
+        if (!current || rowDate > currentDate || (rowDate === currentDate && rowCreated > currentCreated)) {
+          orderMap[row.influencer_id] = {
+            ...row,
+            total_orders: totalOrders,
+          };
+        } else {
+          orderMap[row.influencer_id] = {
+            ...current,
+            total_orders: totalOrders,
+          };
         }
       });
     }
@@ -856,14 +872,30 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
 
       // Fetch orders for this chunk
       const { data: orderRows, error: orderError } = await supabase
-        .from('reference_order_overview')
-        .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
+        .from('reference_orders')
+        .select('influencer_id, date_paid, price_per_video, owner_name, created_at')
         .in('influencer_id', chunk);
 
       if (!orderError && orderRows) {
         orderRows.forEach((row: any) => {
-          if (row.influencer_id) {
-            chunkOrderMap[row.influencer_id] = row;
+          if (!row.influencer_id) return;
+          const current = chunkOrderMap[row.influencer_id];
+          const rowDate = row.date_paid ? new Date(row.date_paid).getTime() : 0;
+          const currentDate = current?.date_paid ? new Date(current.date_paid).getTime() : 0;
+          const rowCreated = row.created_at ? new Date(row.created_at).getTime() : 0;
+          const currentCreated = current?.created_at ? new Date(current.created_at).getTime() : 0;
+          const totalOrders = (current?.total_orders || 0) + 1;
+
+          if (!current || rowDate > currentDate || (rowDate === currentDate && rowCreated > currentCreated)) {
+            chunkOrderMap[row.influencer_id] = {
+              ...row,
+              total_orders: totalOrders,
+            };
+          } else {
+            chunkOrderMap[row.influencer_id] = {
+              ...current,
+              total_orders: totalOrders,
+            };
           }
         });
       }
