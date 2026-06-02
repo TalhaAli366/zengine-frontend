@@ -1,6 +1,7 @@
+import { NextRequest } from 'next/server';
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
-import { NextRequest } from 'next/server';
+import { getServerClient } from '@/lib/supabase/server-singleton';
 
 // Disable caching for this route to ensure fresh data on every request
 export const dynamic = 'force-dynamic';
@@ -38,9 +39,14 @@ async function fetchAllInBatches<T>(
 }
 
 export async function GET(request: NextRequest) {
+  const t0 = Date.now();
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
     const searchParams = request.nextUrl.searchParams;
+    console.log(`[INFLUENCERS API] === START REQUEST === page=${searchParams.get('page')} limit=${searchParams.get('limit')} filters=${JSON.stringify(Object.fromEntries(searchParams.entries()))}`);
+
+    const t1 = Date.now();
+    console.log(`[INFLUENCERS API] Supabase client init: ${t1 - t0}ms`);
 
     // Get filter parameters
     const campaignId = searchParams.get('campaign');
@@ -672,58 +678,6 @@ export async function GET(request: NextRequest) {
       query = query.order('last_scraped', { ascending: sortAscending });
     }
 
-    // Get total count with same filters (before pagination)
-    let countQuery = supabase
-      .from('influencers')
-      .select('*', { count: 'exact', head: true });
-
-    // Apply same filters to count query
-    if (influencerIds && influencerIds.length > 0 && influencerIds.length <= chunkSize) {
-      countQuery = countQuery.in('id', influencerIds);
-    }
-    if (searchQuery) {
-      countQuery = countQuery.or(`username.ilike.%${searchQuery}%,display_name.ilike.%${searchQuery}%`);
-    }
-    if (minFollowers) {
-      countQuery = countQuery.gte('followers', parseInt(minFollowers));
-    }
-    if (maxFollowers) {
-      countQuery = countQuery.lte('followers', parseInt(maxFollowers));
-    }
-    if (minEngagementRate) {
-      countQuery = countQuery.gte('engagement_rate', parseFloat(minEngagementRate));
-    }
-    if (maxEngagementRate) {
-      countQuery = countQuery.lte('engagement_rate', parseFloat(maxEngagementRate));
-    }
-    if (minAvgViews) {
-      countQuery = countQuery.gte('avg_views', parseFloat(minAvgViews));
-    }
-    if (maxAvgViews) {
-      countQuery = countQuery.lte('avg_views', parseFloat(maxAvgViews));
-    }
-    if (country) {
-      countQuery = countQuery.ilike('country', `%${country}%`);
-    }
-    if (reachedOut === 'true') {
-      countQuery = countQuery.eq('has_outreach', true);
-    } else if (reachedOut === 'false') {
-      countQuery = countQuery.eq('has_outreach', false);
-    }
-    if (hasEmail === 'true') {
-      countQuery = countQuery.not('email', 'is', null).not('email', 'eq', '');
-    }
-
-    let count = 0;
-    try {
-      const countResult = await countQuery;
-      count = countResult.count || 0;
-      console.log(`[INFLUENCERS API] Count query result: ${count}`);
-    } catch (countError: any) {
-      console.error(`[INFLUENCERS API] Count query error:`, countError);
-      // Continue with main query, we'll use the count from the main query if available
-    }
-
     // Apply pagination to main query
     query = query.range(offset, offset + limit - 1);
 
@@ -732,9 +686,11 @@ export async function GET(request: NextRequest) {
     let queryError: any = null;
 
     try {
+      const tDataStart = Date.now();
       const result = await query;
       influencers = result.data || [];
       queryError = result.error;
+      console.log(`[INFLUENCERS API] Data query: ${Date.now() - tDataStart}ms (rows=${influencers.length})`);
 
       // count comes from countQuery only; main query is data-only for performance
     } catch (err: any) {
@@ -753,8 +709,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch campaign associations and orders for paginated influencers only
+    const tAssocStart = Date.now();
     const allInfluencerIds = (influencers || []).map(inf => inf.id);
     const { campaignMap, orderMap } = await fetchAssociations(supabase, allInfluencerIds);
+    console.log(`[INFLUENCERS API] fetchAssociations: ${Date.now() - tAssocStart}ms`);
 
     // Transform data to include campaign names
     const transformedData = (influencers || []).map((inf: any) => ({
@@ -764,13 +722,13 @@ export async function GET(request: NextRequest) {
       campaign_count: (campaignMap[inf.id] || []).length
     }));
 
-    console.log('Fetched influencers:', transformedData?.length, 'Total:', count);
+    console.log(`[INFLUENCERS API] === TOTAL REQUEST TIME: ${Date.now() - t0}ms === Fetched: ${transformedData?.length}, Total: pending (count loaded separately)`);
     return Response.json({
       data: transformedData || [],
-      total: count || 0,
+      total: -1,
       page: page,
       limit: limit,
-      totalPages: Math.ceil((count || 0) / limit)
+      totalPages: -1
     });
   } catch (error: any) {
     console.error('API error:', error);
@@ -780,11 +738,13 @@ export async function GET(request: NextRequest) {
 
 // Helper function to fetch campaign associations and orders (with batching for >1000 IDs)
 async function fetchAssociations(supabase: any, influencerIds: string[]) {
+  const t0 = Date.now();
   let campaignMap: Record<string, string[]> = {};
   let orderMap: Record<string, any> = {};
 
   if (influencerIds.length === 0) {
-    return { campaignMap, orderMap };
+  console.log(`[INFLUENCERS API] fetchAssociations TOTAL: ${Date.now() - t0}ms`);
+  return { campaignMap, orderMap };
   }
 
   const chunkSize = 1000;
@@ -792,18 +752,40 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
   // Fetch campaign links in batches if needed
   if (influencerIds.length <= chunkSize) {
     // Simple case: <= 1000 influencers
-    const { data: campaignLinks, error: linkError } = await supabase
-      .from('campaign_influencers')
-      .select('influencer_id, campaign_id')
-      .in('influencer_id', influencerIds);
+    // Fire campaign_influencers and orders IN PARALLEL since they're independent
+    const tParallel = Date.now();
+    const [campaignLinksResult, orderRowsResult] = await Promise.all([
+      supabase
+        .from('campaign_influencers')
+        .select('influencer_id, campaign_id')
+        .in('influencer_id', influencerIds),
+      supabase
+        .from('reference_order_overview')
+        .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
+        .in('influencer_id', influencerIds),
+    ]);
+    console.log(`[INFLUENCERS API] fetchAssociations - parallel (campaign_links + orders): ${Date.now() - tParallel}ms`);
+
+    const { data: campaignLinks, error: linkError } = campaignLinksResult;
+    const { data: orderRows, error: orderError } = orderRowsResult;
+
+    if (!orderError && orderRows) {
+      orderRows.forEach((row: any) => {
+        if (row.influencer_id) {
+          orderMap[row.influencer_id] = row;
+        }
+      });
+    }
 
     if (!linkError && campaignLinks && campaignLinks.length > 0) {
       const campaignIds = [...new Set(campaignLinks.map((link: any) => link.campaign_id))];
 
+      const t3 = Date.now();
       const { data: campaigns, error: campaignError } = await supabase
         .from('campaigns')
         .select('id, name')
         .in('id', campaignIds);
+      console.log(`[INFLUENCERS API] fetchAssociations - campaigns query: ${Date.now() - t3}ms`);
 
       if (!campaignError && campaigns) {
         const campaignNameMap: Record<string, string> = {};
@@ -824,20 +806,6 @@ async function fetchAssociations(supabase: any, influencerIds: string[]) {
           }
         });
       }
-    }
-
-    // Fetch orders
-    const { data: orderRows, error: orderError } = await supabase
-      .from('reference_order_overview')
-      .select('influencer_id, date_paid, price_per_video, owner_name, total_orders')
-      .in('influencer_id', influencerIds);
-
-    if (!orderError && orderRows) {
-      orderRows.forEach((row: any) => {
-        if (row.influencer_id) {
-          orderMap[row.influencer_id] = row;
-        }
-      });
     }
   } else {
     // Complex case: > 1000 influencers, fetch in batches in parallel

@@ -24,6 +24,18 @@ interface ReferenceOrderRow {
   video_links?: string;
   paid?: boolean;
   date_paid?: string;
+  order_date?: string;
+  payment_status?: string;
+  scammer_status?: string;
+  overbudget_notes?: string;
+  creator_category?: string;
+  owner_notes?: string;
+  videos_posted?: number;
+  completion_rate?: number;
+  over_10_days?: boolean;
+  dispute_status?: string;
+  old_creator?: boolean;
+  raw_notes?: string;
   total_orders?: number;
   avg_price_per_video?: number;
   avg_views?: number | null;
@@ -421,6 +433,18 @@ export default function ReferenceOrdersPage() {
       songs: '',
       videoLinks: '',
       datePaid: '',
+      orderDate: '',
+      paymentStatus: '',
+      scammerStatus: '',
+      overbudgetNotes: '',
+      creatorCategory: '',
+      ownerNotes: '',
+      videosPosted: '',
+      completionRate: '',
+      over10Days: false,
+      disputeStatus: '',
+      oldCreator: false,
+      rawNotes: '',
       approvedVendor: false,
       paid: true,
     }),
@@ -1390,6 +1414,18 @@ export default function ReferenceOrdersPage() {
       songs: order.songs || '',
       videoLinks: order.video_links || '',
       datePaid: formatDateForInput(order.date_paid),
+      orderDate: formatDateForInput(order.order_date),
+      paymentStatus: order.payment_status || '',
+      scammerStatus: order.scammer_status || '',
+      overbudgetNotes: order.overbudget_notes || '',
+      creatorCategory: order.creator_category || '',
+      ownerNotes: order.owner_notes || '',
+      videosPosted: toInputValue(order.videos_posted),
+      completionRate: toInputValue(order.completion_rate),
+      over10Days: Boolean(order.over_10_days),
+      disputeStatus: order.dispute_status || '',
+      oldCreator: Boolean(order.old_creator),
+      rawNotes: order.raw_notes || '',
       approvedVendor: Boolean(order.approved_vendor),
       paid: Boolean(order.paid),
     });
@@ -1423,6 +1459,18 @@ export default function ReferenceOrdersPage() {
       songs: editForm.songs,
       videoLinks: editForm.videoLinks,
       datePaid: editForm.datePaid,
+      orderDate: editForm.orderDate,
+      paymentStatus: editForm.paymentStatus,
+      scammerStatus: editForm.scammerStatus,
+      overbudgetNotes: editForm.overbudgetNotes,
+      creatorCategory: editForm.creatorCategory,
+      ownerNotes: editForm.ownerNotes,
+      videosPosted: editForm.videosPosted,
+      completionRate: editForm.completionRate,
+      over10Days: editForm.over10Days,
+      disputeStatus: editForm.disputeStatus,
+      oldCreator: editForm.oldCreator,
+      rawNotes: editForm.rawNotes,
       approvedVendor: editForm.approvedVendor,
       paid: editForm.paid,
     };
@@ -2266,6 +2314,9 @@ export default function ReferenceOrdersPage() {
                                 {order.video_count ? (
                                   <p className="text-xs text-gray-500">{order.video_count} videos</p>
                                 ) : null}
+                                {order.order_date ? (
+                                  <p className="text-xs text-gray-500">Order: {formatDateValue(order.order_date)}</p>
+                                ) : null}
                               </td>
                               <td className="px-6 py-4 text-sm text-gray-700">
                                 <div className="flex items-center gap-2">
@@ -2293,6 +2344,17 @@ export default function ReferenceOrdersPage() {
                                 >
                                   {order.paid ? 'Paid' : 'Pending'}
                                 </span>
+                                {order.payment_status ? (
+                                  <p className="mt-1 text-xs text-gray-500">{order.payment_status}</p>
+                                ) : null}
+                                {order.dispute_status ? (
+                                  <p className="mt-1 text-xs font-medium text-red-600">{order.dispute_status}</p>
+                                ) : null}
+                                {order.scammer_status ? (
+                                  <p className={`mt-1 text-xs font-medium ${order.scammer_status.toLowerCase().includes('scam') ? 'text-red-600' : 'text-gray-500'}`}>
+                                    {order.scammer_status}
+                                  </p>
+                                ) : null}
                               </td>
                               <td className="px-6 py-4 text-sm">
                                 {(() => {
@@ -2968,9 +3030,106 @@ export default function ReferenceOrdersPage() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Order Date</label>
+                  <input
+                    type="date"
+                    value={editForm.orderDate}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, orderDate: e.target.value }))}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Status</label>
+                  <input
+                    type="text"
+                    value={editForm.paymentStatus}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, paymentStatus: e.target.value }))}
+                    placeholder="paid, pending, etc."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Scammer Status</label>
+                  <input
+                    type="text"
+                    value={editForm.scammerStatus}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, scammerStatus: e.target.value }))}
+                    placeholder="SAFE / SCAMMER"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Dispute Status</label>
+                  <input
+                    type="text"
+                    value={editForm.disputeStatus}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, disputeStatus: e.target.value }))}
+                    placeholder="DISPUTED / REFUNDED"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Videos Posted</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editForm.videosPosted}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, videosPosted: e.target.value }))}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Completion Rate</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editForm.completionRate}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, completionRate: e.target.value }))}
+                    placeholder="1.0"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Creator Category</label>
+                  <input
+                    type="text"
+                    value={editForm.creatorCategory}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, creatorCategory: e.target.value }))}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Owner Notes</label>
+                  <textarea
+                    value={editForm.ownerNotes}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, ownerNotes: e.target.value }))}
+                    rows={2}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Over Budget Notes</label>
+                  <textarea
+                    value={editForm.overbudgetNotes}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, overbudgetNotes: e.target.value }))}
+                    rows={2}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Raw Notes</label>
+                  <textarea
+                    value={editForm.rawNotes}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, rawNotes: e.target.value }))}
+                    rows={2}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
                   <input
                     type="checkbox"
@@ -2988,6 +3147,24 @@ export default function ReferenceOrdersPage() {
                     onChange={(e) => setEditForm((prev) => ({ ...prev, paid: e.target.checked }))}
                   />
                   <span className="text-sm text-gray-700">Payment received</span>
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    checked={editForm.over10Days}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, over10Days: e.target.checked }))}
+                  />
+                  <span className="text-sm text-gray-700">Over 10 days</span>
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-gray-200 p-4">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    checked={editForm.oldCreator}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, oldCreator: e.target.checked }))}
+                  />
+                  <span className="text-sm text-gray-700">Old creator</span>
                 </label>
               </div>
 
@@ -3180,4 +3357,3 @@ export default function ReferenceOrdersPage() {
     </>
   );
 }
-

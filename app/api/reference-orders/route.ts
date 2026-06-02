@@ -1,7 +1,8 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { createHash } from 'crypto';
+import { getServerClient } from '@/lib/supabase/server-singleton';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 
 // Disable caching for this route to ensure fresh data on every request
 export const dynamic = 'force-dynamic';
@@ -41,7 +42,7 @@ const parseBoolean = (value: any) => {
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
 
     // For unique creators, use a more efficient database-level approach
     // to avoid loading all 41k+ records into memory
@@ -89,6 +90,18 @@ export async function GET(request: NextRequest) {
         paid,
         date_paid,
         video_links,
+        order_date,
+        payment_status,
+        scammer_status,
+        overbudget_notes,
+        creator_category,
+        owner_notes,
+        videos_posted,
+        completion_rate,
+        over_10_days,
+        dispute_status,
+        old_creator,
+        raw_notes,
         created_at
       `, { count: 'exact' })
       // Default sort: non-zero price_per_video first, then by date_paid desc
@@ -170,6 +183,18 @@ export async function GET(request: NextRequest) {
           paid,
           date_paid,
           video_links,
+          order_date,
+          payment_status,
+          scammer_status,
+          overbudget_notes,
+          creator_category,
+          owner_notes,
+          videos_posted,
+          completion_rate,
+          over_10_days,
+          dispute_status,
+          old_creator,
+          raw_notes,
           created_at
         `, { count: 'exact' });
 
@@ -299,6 +324,18 @@ export async function GET(request: NextRequest) {
           paid,
           date_paid,
           video_links,
+          order_date,
+          payment_status,
+          scammer_status,
+          overbudget_notes,
+          creator_category,
+          owner_notes,
+          videos_posted,
+          completion_rate,
+          over_10_days,
+          dispute_status,
+          old_creator,
+          raw_notes,
           created_at
         `, { count: 'exact' });
 
@@ -536,6 +573,18 @@ export async function GET(request: NextRequest) {
                     paid,
                     date_paid,
                     video_links,
+                    order_date,
+                    payment_status,
+                    scammer_status,
+                    overbudget_notes,
+                    creator_category,
+                    owner_notes,
+                    videos_posted,
+                    completion_rate,
+                    over_10_days,
+                    dispute_status,
+                    old_creator,
+                    raw_notes,
                     created_at
                   `)
                   .in('normalized_username', chunk);
@@ -662,6 +711,18 @@ export async function GET(request: NextRequest) {
                 paid,
                 date_paid,
                 video_links,
+                order_date,
+                payment_status,
+                scammer_status,
+                overbudget_notes,
+                creator_category,
+                owner_notes,
+                videos_posted,
+                completion_rate,
+                over_10_days,
+                dispute_status,
+                old_creator,
+                raw_notes,
                 created_at
               `);
 
@@ -1000,6 +1061,18 @@ export async function GET(request: NextRequest) {
           paid,
           date_paid,
           video_links,
+          order_date,
+          payment_status,
+          scammer_status,
+          overbudget_notes,
+          creator_category,
+          owner_notes,
+          videos_posted,
+          completion_rate,
+          over_10_days,
+          dispute_status,
+          old_creator,
+          raw_notes,
           created_at
         `, { count: 'exact' });
 
@@ -1497,6 +1570,18 @@ export async function GET(request: NextRequest) {
           paid,
           date_paid,
           video_links,
+          order_date,
+          payment_status,
+          scammer_status,
+          overbudget_notes,
+          creator_category,
+          owner_notes,
+          videos_posted,
+          completion_rate,
+          over_10_days,
+          dispute_status,
+          old_creator,
+          raw_notes,
           created_at
         `, { count: 'exact' });
 
@@ -1543,6 +1628,18 @@ export async function GET(request: NextRequest) {
                 paid,
                 date_paid,
                 video_links,
+                order_date,
+                payment_status,
+                scammer_status,
+                overbudget_notes,
+                creator_category,
+                owner_notes,
+                videos_posted,
+                completion_rate,
+                over_10_days,
+                dispute_status,
+                old_creator,
+                raw_notes,
                 created_at
               `, { count: 'exact' })
               .in('normalized_username', chunk);
@@ -2077,6 +2174,7 @@ export async function POST(request: NextRequest) {
     const normalized = normalizeUsername(username);
     const ownerName = (body.ownerName || body.owner_name || '').trim();
     const datePaid = body.datePaid || body.date_paid || null;
+    const orderDate = body.orderDate || body.order_date || null;
 
     let influencerId: string | null = null;
     if (normalized) {
@@ -2092,7 +2190,7 @@ export async function POST(request: NextRequest) {
 
     const orderHash = createHash('sha256')
       .update(
-        `${normalized}|${(datePaid || '').toString()}|${(body.pricePerVideo ?? body.price_per_video ?? '').toString()}|${ownerName}`.toLowerCase(),
+        `${normalized}|${(orderDate || datePaid || '').toString()}|${(body.songs || '').toString()}|${(body.pricePerVideo ?? body.price_per_video ?? '').toString()}|${ownerName}`.toLowerCase(),
       )
       .digest('hex');
 
@@ -2113,6 +2211,18 @@ export async function POST(request: NextRequest) {
       paid: parseBoolean(body.paid ?? body.isPaid ?? body.paid_status) ?? false,
       owner_name: ownerName || null,
       date_paid: datePaid || null,
+      order_date: orderDate || null,
+      payment_status: body.paymentStatus || body.payment_status || null,
+      scammer_status: body.scammerStatus || body.scammer_status || null,
+      overbudget_notes: body.overbudgetNotes || body.overbudget_notes || null,
+      creator_category: body.creatorCategory || body.creator_category || null,
+      owner_notes: body.ownerNotes || body.owner_notes || null,
+      videos_posted: parseInteger(body.videosPosted ?? body.videos_posted),
+      completion_rate: parseNumber(body.completionRate ?? body.completion_rate),
+      over_10_days: parseBoolean(body.over10Days ?? body.over_10_days),
+      dispute_status: body.disputeStatus || body.dispute_status || null,
+      old_creator: parseBoolean(body.oldCreator ?? body.old_creator),
+      raw_notes: body.rawNotes || body.raw_notes || null,
       order_hash: orderHash,
     };
 
@@ -2233,6 +2343,54 @@ export async function PATCH(request: NextRequest) {
       updatePayload.date_paid = body.datePaid || body.date_paid || null;
     }
 
+    if (body.orderDate !== undefined || body.order_date !== undefined) {
+      updatePayload.order_date = body.orderDate || body.order_date || null;
+    }
+
+    if (body.paymentStatus !== undefined || body.payment_status !== undefined) {
+      updatePayload.payment_status = body.paymentStatus || body.payment_status || null;
+    }
+
+    if (body.scammerStatus !== undefined || body.scammer_status !== undefined) {
+      updatePayload.scammer_status = body.scammerStatus || body.scammer_status || null;
+    }
+
+    if (body.overbudgetNotes !== undefined || body.overbudget_notes !== undefined) {
+      updatePayload.overbudget_notes = body.overbudgetNotes || body.overbudget_notes || null;
+    }
+
+    if (body.creatorCategory !== undefined || body.creator_category !== undefined) {
+      updatePayload.creator_category = body.creatorCategory || body.creator_category || null;
+    }
+
+    if (body.ownerNotes !== undefined || body.owner_notes !== undefined) {
+      updatePayload.owner_notes = body.ownerNotes || body.owner_notes || null;
+    }
+
+    if (body.videosPosted !== undefined || body.videos_posted !== undefined) {
+      updatePayload.videos_posted = parseInteger(body.videosPosted ?? body.videos_posted);
+    }
+
+    if (body.completionRate !== undefined || body.completion_rate !== undefined) {
+      updatePayload.completion_rate = parseNumber(body.completionRate ?? body.completion_rate);
+    }
+
+    if (body.over10Days !== undefined || body.over_10_days !== undefined) {
+      updatePayload.over_10_days = parseBoolean(body.over10Days ?? body.over_10_days);
+    }
+
+    if (body.disputeStatus !== undefined || body.dispute_status !== undefined) {
+      updatePayload.dispute_status = body.disputeStatus || body.dispute_status || null;
+    }
+
+    if (body.oldCreator !== undefined || body.old_creator !== undefined) {
+      updatePayload.old_creator = parseBoolean(body.oldCreator ?? body.old_creator);
+    }
+
+    if (body.rawNotes !== undefined || body.raw_notes !== undefined) {
+      updatePayload.raw_notes = body.rawNotes || body.raw_notes || null;
+    }
+
     if (Object.keys(updatePayload).length === 0) {
       return Response.json({ error: 'No updates provided' }, { status: 400 });
     }
@@ -2309,4 +2467,3 @@ export async function DELETE(request: NextRequest) {
     return Response.json({ error: error.message || 'Failed to delete order' }, { status: 500 });
   }
 }
-

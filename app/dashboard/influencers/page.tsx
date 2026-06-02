@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, Users, Search, Filter, X, Trash2, ChevronLeft, ChevronRight, MapPin, BarChart3, TrendingUp, CalendarDays, DollarSign, Edit2, ChevronUp, ChevronDown } from 'lucide-react';
 import { detectRegion } from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ScatterChart, Scatter, LineChart, Line } from 'recharts';
+import SearchableSelect from '@/components/SearchableSelect';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -31,22 +32,6 @@ interface Influencer {
   campaign_count?: number;
   profile_url?: string;
   metadata?: any;
-}
-
-interface Campaign {
-  id: string;
-  name: string;
-}
-
-interface Hashtag {
-  id: number;
-  tag: string;
-}
-
-interface Sound {
-  id: number;
-  sound_id: string;
-  name?: string;
 }
 
 interface OutreachSelectionInfluencer {
@@ -124,9 +109,6 @@ export default function InfluencersPage() {
   const [appliedReachedOutFilter, setAppliedReachedOutFilter] = useState('');
   const [appliedOnlyWithEmail, setAppliedOnlyWithEmail] = useState(false);
   const [appliedOnlyPersonalEmail, setAppliedOnlyPersonalEmail] = useState(false);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [hashtags, setHashtags] = useState<Hashtag[]>([]);
-  const [sounds, setSounds] = useState<Sound[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [showVisualizations, setShowVisualizations] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -200,8 +182,6 @@ export default function InfluencersPage() {
   };
 
   useEffect(() => {
-    loadCampaigns();
-    loadFilters();
     loadInfluencers();
   }, [currentPage, appliedSearchQuery, appliedSelectedCampaign, appliedMinFollowers, appliedMaxFollowers, appliedMinEngagementRate, appliedMaxEngagementRate, appliedMinAvgViews, appliedMaxAvgViews, appliedSelectedHashtag, appliedSelectedSound, appliedSelectedCountry, appliedReachedOutFilter, appliedOnlyWithEmail, appliedOnlyPersonalEmail, sortBy, sortOrder]); // Reload when page, sorting, or applied filters change
 
@@ -302,31 +282,6 @@ export default function InfluencersPage() {
     setInfluencers(allInfluencers);
   }, [allInfluencers]);
 
-  const loadCampaigns = async () => {
-    try {
-      const response = await fetch('/api/campaigns');
-      if (response.ok) {
-        const data = await response.json();
-        setCampaigns(Array.isArray(data) ? data : (data.campaigns || []));
-      }
-    } catch (error) {
-      console.error('Failed to load campaigns:', error);
-    }
-  };
-
-  const loadFilters = async () => {
-    try {
-      const response = await fetch('/api/filters');
-      if (response.ok) {
-        const data = await response.json();
-        setHashtags(data.hashtags || []);
-        setSounds(data.sounds || []);
-      }
-    } catch (error) {
-      console.error('Failed to load filters:', error);
-    }
-  };
-
   const loadInfluencers = async () => {
     try {
       setLoadingInfluencers(true);
@@ -354,10 +309,11 @@ export default function InfluencersPage() {
       params.append('sort_by', sortBy);
       params.append('sort_order', sortOrder);
 
-      const url = `/api/influencers?${params.toString()}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to load');
-      const result = await response.json();
+      // Fetch data first (returns immediately without count)
+      const dataUrl = `/api/influencers?${params.toString()}`;
+      const dataResponse = await fetch(dataUrl);
+      if (!dataResponse.ok) throw new Error('Failed to load');
+      const result = await dataResponse.json();
 
       // Handle both old format (array) and new format (object with pagination)
       if (Array.isArray(result)) {
@@ -368,9 +324,30 @@ export default function InfluencersPage() {
       } else {
         setAllInfluencers(result.data || []);
         setInfluencers(result.data || []);
-        setTotalCount(result.total || 0);
-        setTotalPages(result.totalPages || 1);
+        // Count is loaded separately — show data immediately
+        if (result.total === -1) {
+          // Count pending — will be loaded via background fetch
+          setTotalCount(0);
+          setTotalPages(1);
+        } else {
+          setTotalCount(result.total || 0);
+          setTotalPages(result.totalPages || 1);
+        }
       }
+
+      // Lazy-load count in background
+      const countParams = new URLSearchParams(params.toString());
+      fetch(`/api/influencers/count?${countParams.toString()}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(countResult => {
+          if (countResult && countResult.total !== -1 && countResult.total !== undefined) {
+            setTotalCount(countResult.total);
+            setTotalPages(Math.ceil(countResult.total / itemsPerPage) || 1);
+          }
+        })
+        .catch(() => {
+          // Silently ignore count errors — data is already displayed
+        });
     } catch (err) {
       console.error('Error loading influencers:', err);
     } finally {
@@ -786,7 +763,7 @@ export default function InfluencersPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Influencers</h1>
           <p className="text-gray-600">
-            Showing {influencers.length} of {totalCount} influencers
+            Showing {influencers.length}{totalCount > 0 ? ` of ${totalCount.toLocaleString()}` : ''} influencers{totalCount === 0 && !loadingInfluencers ? '...' : ''}
             {totalPages > 1 && ` (Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
@@ -937,61 +914,31 @@ export default function InfluencersPage() {
                 </div>
 
                 {/* Campaign Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Campaign
-                  </label>
-                  <select
-                    value={selectedCampaign}
-                    onChange={(e) => setSelectedCampaign(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  >
-                    <option value="">All Campaigns</option>
-                    {campaigns.map(campaign => (
-                      <option key={campaign.id} value={campaign.id}>
-                        {campaign.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <SearchableSelect
+                  label="Campaign"
+                  placeholder="Search campaigns..."
+                  searchType="campaign"
+                  value={selectedCampaign}
+                  onChange={(val) => setSelectedCampaign(val)}
+                />
 
                 {/* Hashtag Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Hashtag
-                  </label>
-                  <select
-                    value={selectedHashtag}
-                    onChange={(e) => setSelectedHashtag(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  >
-                    <option value="">All Hashtags</option>
-                    {hashtags.map(hashtag => (
-                      <option key={hashtag.id} value={hashtag.id.toString()}>
-                        #{hashtag.tag}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <SearchableSelect
+                  label="Hashtag"
+                  placeholder="Search hashtags..."
+                  searchType="hashtag"
+                  value={selectedHashtag}
+                  onChange={(val) => setSelectedHashtag(val)}
+                />
 
                 {/* Sound Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Sound ID
-                  </label>
-                  <select
-                    value={selectedSound}
-                    onChange={(e) => setSelectedSound(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                  >
-                    <option value="">All Sounds</option>
-                    {sounds.map(sound => (
-                      <option key={sound.id} value={sound.id.toString()}>
-                        {sound.name || sound.sound_id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <SearchableSelect
+                  label="Sound ID"
+                  placeholder="Search sounds..."
+                  searchType="sound"
+                  value={selectedSound}
+                  onChange={(val) => setSelectedSound(val)}
+                />
 
                 {/* Outreach Filter */}
                 <div>
@@ -1572,7 +1519,7 @@ export default function InfluencersPage() {
               {totalPages > 1 && (
                 <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
                   <div className="text-sm text-gray-600">
-                    Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount} influencers
+                    Showing {(currentPage - 1) * itemsPerPage + 1}-{Math.min(currentPage * itemsPerPage, totalCount || influencers.length)}{totalCount > 0 ? ` of ${totalCount.toLocaleString()}` : ''} influencers
                   </div>
                   <div className="flex items-center gap-2">
                     <button

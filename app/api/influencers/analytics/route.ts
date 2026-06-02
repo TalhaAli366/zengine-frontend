@@ -1,13 +1,13 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
+import { getServerClient } from '@/lib/supabase/server-singleton';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
     const searchParams = request.nextUrl.searchParams;
 
     const args = {

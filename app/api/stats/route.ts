@@ -1,12 +1,12 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { getServerClient } from '@/lib/supabase/server-singleton';
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
 
     const [
       { count: scrapedInfluencersCount },

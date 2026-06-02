@@ -1,10 +1,11 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+import { getServerClient } from '@/lib/supabase/server-singleton';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
     const searchParams = request.nextUrl.searchParams;
     const forceRefresh = searchParams.get('refresh') === 'true';
 

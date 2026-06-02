@@ -1,9 +1,10 @@
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { getServerClient } from '@/lib/supabase/server-singleton';
 
 export async function GET() {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
 
     // Fetch ALL campaigns with pagination (in case there are >1000)
     let allCampaigns: any[] = [];

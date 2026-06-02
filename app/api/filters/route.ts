@@ -1,9 +1,8 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { getServerClient } from '@/lib/supabase/server-singleton';
 
 export async function GET() {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = getServerClient();
     
     // Fetch ALL hashtags with pagination (could be >1000)
     let allHashtags: any[] = [];
