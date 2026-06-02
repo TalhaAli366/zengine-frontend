@@ -10,7 +10,7 @@ A modern, professional authentication system and dashboard for the TikTok Influe
   - Forgot password / Password reset 
   - Protected routes with middleware  
   - Session management with Supabase Auth   
- 
+  
 - ✅ **Professional UI/UX** 
   - Beautiful gradient branding section 
   - Responsive design (mobile-first)
