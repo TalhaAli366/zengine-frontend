@@ -663,6 +663,25 @@ export default function InfluencersPage() {
     }
   };
 
+  const handleBulkDetectRegion = async () => {
+    if (selectedInfluencerIds.length === 0) return;
+
+    setDetectingRegionId('bulk');
+    try {
+      const result = await detectRegion(selectedInfluencerIds);
+      if (result.status === 'completed') {
+        await loadInfluencers();
+        setError(null);
+      } else {
+        setError(result.message || 'Region detection failed');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to detect regions');
+    } finally {
+      setDetectingRegionId(null);
+    }
+  };
+
   const handleDeleteInfluencer = async (id: string) => {
     if (!confirm('Are you sure you want to delete this influencer? This action cannot be undone.')) {
       return;
@@ -790,6 +809,17 @@ export default function InfluencersPage() {
                 Excel
               </button>
             </div>
+            <button
+              onClick={handleBulkDetectRegion}
+              disabled={!hasSelection || detectingRegionId === 'bulk'}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${hasSelection
+                ? 'text-white bg-blue-600 hover:bg-blue-700'
+                : 'text-gray-500 bg-gray-200 cursor-not-allowed'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {detectingRegionId === 'bulk' ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
+              Detect Country
+            </button>
             <button
               onClick={handleSendToOutreach}
               disabled={!hasSelection}
