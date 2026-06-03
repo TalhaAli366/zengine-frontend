@@ -210,6 +210,9 @@ export async function detectRegion(influencerIds: string[]): Promise<{ status: s
 
     if (!response.ok) {
       const errorData = await response.json();
+      if (response.status === 429) {
+        throw new Error(errorData.detail || 'Gemini rate limit reached. Please try again after some time.');
+      }
       throw new Error(errorData.detail || 'Region detection failed');
     }
 

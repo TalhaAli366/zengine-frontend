@@ -842,6 +842,23 @@ export default function InfluencersPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold text-red-900">Action failed</p>
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+          <button
+            className="text-red-500 hover:text-red-700"
+            onClick={() => setError(null)}
+            aria-label="Dismiss error message"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {editSuccess && (
         <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
           <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
